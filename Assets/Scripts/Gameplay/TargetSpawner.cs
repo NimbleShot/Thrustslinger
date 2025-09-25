@@ -44,8 +44,23 @@ namespace Thrustslinger.Gameplay
     [SerializeField] private bool drawGizmos = true;
     [SerializeField] private bool logSpawns = false;
 
+    [Header("Visualize Difficulty (Runtime)")]
+    [Tooltip("Draw the current spawn rectangle at spawn distance every frame (LineRenderer in Game view or Debug.DrawLine if disabled)")] 
+    [SerializeField] private bool drawRuntimeSpawnArea = true;
+    [SerializeField] private Color runtimeRectColor = new Color(0.95f, 0.7f, 0.2f, 1f);
+    [Tooltip("Use a LineRenderer (visible in Game view) instead of Debug.DrawLine (requires Gizmos)")]
+    [SerializeField] private bool useLineRendererForOutline = true;
+    [SerializeField, Min(0.001f)] private float outlineWidth = 0.02f;
+    [Tooltip("Show a small on-screen HUD with current difficulty, delay range, and spread")] 
+    [SerializeField] private bool showDifficultyHUD = true;
+    [SerializeField] private Vector2 hudOffset = new Vector2(12, 12);
+    [SerializeField] private int hudFontSize = 12;
+
         private IPlaneProvider _plane;
         private float _roundStartTime;
+        private float _lastDelayChosen;
+        private LineRenderer _outlineLR;
+        private Material _outlineMaterial;
 
         private void Awake()
         {
@@ -62,6 +77,7 @@ namespace Thrustslinger.Gameplay
         private void OnDisable()
         {
             StopAllCoroutines();
+            if (_outlineLR) _outlineLR.enabled = false;
         }
 
         private IEnumerator SpawnLoop()
@@ -80,6 +96,7 @@ namespace Thrustslinger.Gameplay
                 var delayMin = Mathf.Lerp(delayRangeStart.x, delayRangeEnd.x, t);
                 var delayMax = Mathf.Lerp(delayRangeStart.y, delayRangeEnd.y, t);
                 float delay = Random.Range(delayMin, delayMax);
+                _lastDelayChosen = delay;
 
                 var halfExt = playerBounds.GetHalfExtents();
                 var spreadScale = Vector2.Lerp(spreadScaleStart, spreadScaleEnd, t);
@@ -120,6 +137,94 @@ namespace Thrustslinger.Gameplay
                 // assign plane (prefer explicit provider on this spawner)
                 mover.SetPlane(_plane);
             }
+        }
+
+        private void LateUpdate()
+        {
+            // In case references were assigned after enable, try resolving lazily
+            if (_plane == null || playerBounds == null || basisTransform == null)
+            {
+                ResolveReferencesIfNeeded();
+            }
+            if (!drawRuntimeSpawnArea)
+            {
+                if (_outlineLR && _outlineLR.enabled) _outlineLR.enabled = false;
+                return;
+            }
+            if (_plane == null || playerBounds == null || basisTransform == null) return;
+
+            float t = Mathf.Clamp01((Time.time - _roundStartTime) / Mathf.Max(0.0001f, maxDifficultyTime));
+            var n = _plane.Normal;
+            GetPlaneAxes(n, out var axisX, out var axisY);
+            var p0 = _plane.PlanePoint;
+            var center = p0 + n * spawnDistance;
+            var halfPlayer = playerBounds.GetHalfExtents();
+            var spread = Vector2.Lerp(spreadScaleStart, spreadScaleEnd, t);
+            var spawnHalf = new Vector2(Mathf.Abs(halfPlayer.x) * Mathf.Abs(spread.x), Mathf.Abs(halfPlayer.y) * Mathf.Abs(spread.y));
+
+            var c0 = center + axisX * (-spawnHalf.x) + axisY * (-spawnHalf.y);
+            var c1 = center + axisX * ( spawnHalf.x) + axisY * (-spawnHalf.y);
+            var c2 = center + axisX * ( spawnHalf.x) + axisY * ( spawnHalf.y);
+            var c3 = center + axisX * (-spawnHalf.x) + axisY * ( spawnHalf.y);
+
+            if (useLineRendererForOutline)
+            {
+                EnsureOutlineRenderer();
+                if (_outlineLR)
+                {
+                    _outlineLR.enabled = true;
+                    _outlineLR.startWidth = outlineWidth;
+                    _outlineLR.endWidth = outlineWidth;
+                    ApplyOutlineColor(runtimeRectColor);
+                    _outlineLR.positionCount = 5; // closed loop
+                    _outlineLR.SetPosition(0, c0);
+                    _outlineLR.SetPosition(1, c1);
+                    _outlineLR.SetPosition(2, c2);
+                    _outlineLR.SetPosition(3, c3);
+                    _outlineLR.SetPosition(4, c0);
+                }
+            }
+            else
+            {
+                if (_outlineLR && _outlineLR.enabled) _outlineLR.enabled = false; // turn off LR when using debug lines
+                // Requires Game view Gizmos to be enabled
+                Debug.DrawLine(c0, c1, runtimeRectColor, 0f, false);
+                Debug.DrawLine(c1, c2, runtimeRectColor, 0f, false);
+                Debug.DrawLine(c2, c3, runtimeRectColor, 0f, false);
+                Debug.DrawLine(c3, c0, runtimeRectColor, 0f, false);
+            }
+        }
+
+        private void OnGUI()
+        {
+            if (!showDifficultyHUD) return;
+
+            // Simple IMGUI overlay for quick iteration
+            var style = new GUIStyle(GUI.skin.box)
+            {
+                fontSize = hudFontSize,
+                alignment = TextAnchor.UpperLeft,
+                wordWrap = true
+            };
+
+            float t = Mathf.Clamp01((Time.time - _roundStartTime) / Mathf.Max(0.0001f, maxDifficultyTime));
+            var delayMin = Mathf.Lerp(delayRangeStart.x, delayRangeEnd.x, t);
+            var delayMax = Mathf.Lerp(delayRangeStart.y, delayRangeEnd.y, t);
+            var spread = Vector2.Lerp(spreadScaleStart, spreadScaleEnd, t);
+            var half = playerBounds ? playerBounds.GetHalfExtents() : Vector2.zero;
+            var spawnHalf = new Vector2(Mathf.Abs(half.x) * Mathf.Abs(spread.x), Mathf.Abs(half.y) * Mathf.Abs(spread.y));
+
+            string text =
+                $"Difficulty t: {t:F2}\n" +
+                $"Elapsed: {(Time.time - _roundStartTime):F1}s  MaxTime: {maxDifficultyTime:F0}s\n" +
+                $"Delay range: [{delayMin:F2} .. {delayMax:F2}]s  Last: {_lastDelayChosen:F2}s\n" +
+                $"Spread scale: x={spread.x:F2}, y={spread.y:F2}\n" +
+                $"Spawn half-extents: x={spawnHalf.x:F2}m, y={spawnHalf.y:F2}m\n" +
+                $"Spawn distance: {spawnDistance:F1}m";
+
+            var size = style.CalcSize(new GUIContent(text));
+            var rect = new Rect(hudOffset.x, hudOffset.y, Mathf.Max(size.x + 12, 240), size.y + 12);
+            GUI.Box(rect, text, style);
         }
 
         private void ResolveReferencesIfNeeded()
@@ -186,8 +291,9 @@ namespace Thrustslinger.Gameplay
             var center = p0 + n * spawnDistance;
             var half = bounds.GetHalfExtents();
 
-            // Draw spawn rectangle (at current difficulty midpoint estimate)
-            var t = Application.isPlaying ? Mathf.Clamp01((Time.time - _roundStartTime) / Mathf.Max(0.0001f, maxDifficultyTime)) : 0.5f;
+            // Draw spawn rectangle
+            // In edit mode (not playing), preview the START spread only to avoid confusion.
+            var t = Application.isPlaying ? Mathf.Clamp01((Time.time - _roundStartTime) / Mathf.Max(0.0001f, maxDifficultyTime)) : 0f;
             var spread = Vector2.Lerp(spreadScaleStart, spreadScaleEnd, t);
             var spawnHalf = new Vector2(Mathf.Abs(half.x) * Mathf.Abs(spread.x), Mathf.Abs(half.y) * Mathf.Abs(spread.y));
 
@@ -197,12 +303,84 @@ namespace Thrustslinger.Gameplay
             var c3 = center + axisX * (-spawnHalf.x) + axisY * ( spawnHalf.y);
 
             var prev = Gizmos.color;
-            Gizmos.color = new Color(0.9f, 0.8f, 0.1f, 0.65f);
+            // Use the same color as the runtime outline for consistency in editor previews
+            var gizmoColor = runtimeRectColor;
+            if (!Application.isPlaying)
+            {
+                // Make sure it's a bit translucent in the Scene view when not playing
+                gizmoColor.a = Mathf.Clamp01(gizmoColor.a * 0.75f + 0.15f);
+            }
+            Gizmos.color = gizmoColor;
             Gizmos.DrawLine(c0, c1);
             Gizmos.DrawLine(c1, c2);
             Gizmos.DrawLine(c2, c3);
             Gizmos.DrawLine(c3, c0);
             Gizmos.color = prev;
+        }
+
+        private void OnValidate()
+        {
+            // Keep outline width sane
+            outlineWidth = Mathf.Max(0.001f, outlineWidth);
+            // Try to keep references wired after inspector edits
+            if (!Application.isPlaying)
+            {
+                ResolveReferencesIfNeeded();
+            }
+            // Reflect inspector changes immediately for LR if it already exists
+            if (_outlineLR)
+            {
+                _outlineLR.startWidth = outlineWidth;
+                _outlineLR.endWidth = outlineWidth;
+                ApplyOutlineColor(runtimeRectColor);
+                _outlineLR.enabled = drawRuntimeSpawnArea && useLineRendererForOutline;
+            }
+        }
+
+        private void EnsureOutlineRenderer()
+        {
+            if (_outlineLR != null) return;
+
+            var go = new GameObject("SpawnOutline");
+            go.transform.SetParent(transform, false);
+            _outlineLR = go.AddComponent<LineRenderer>();
+            _outlineLR.useWorldSpace = true;
+            _outlineLR.loop = false;
+            _outlineLR.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            _outlineLR.receiveShadows = false;
+            _outlineLR.textureMode = LineTextureMode.Stretch;
+            // Create a lightweight runtime material suitable for URP
+            if (_outlineMaterial == null)
+            {
+                Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+                if (shader == null) shader = Shader.Find("Sprites/Default");
+                if (shader == null) shader = Shader.Find("Legacy Shaders/Particles/Alpha Blended");
+                _outlineMaterial = new Material(shader);
+                _outlineMaterial.hideFlags = HideFlags.HideAndDontSave;
+            }
+            _outlineLR.material = _outlineMaterial;
+            ApplyOutlineColor(runtimeRectColor);
+        }
+
+        private void ApplyOutlineColor(Color c)
+        {
+            if (_outlineLR)
+            {
+                // Also set gradient for completeness
+                var grad = new Gradient();
+                grad.SetKeys(
+                    new[] { new GradientColorKey(c, 0f), new GradientColorKey(c, 1f) },
+                    new[] { new GradientAlphaKey(c.a, 0f), new GradientAlphaKey(c.a, 1f) }
+                );
+                _outlineLR.colorGradient = grad;
+            }
+            if (_outlineMaterial)
+            {
+                if (_outlineMaterial.HasProperty("_BaseColor"))
+                    _outlineMaterial.SetColor("_BaseColor", c);
+                else if (_outlineMaterial.HasProperty("_Color"))
+                    _outlineMaterial.SetColor("_Color", c);
+            }
         }
     }
 }
