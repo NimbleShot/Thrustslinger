@@ -1,4 +1,5 @@
 using UnityEngine;
+using Thrustslinger.XR;
 
 namespace Thrustslinger.Gameplay
 {
@@ -8,8 +9,8 @@ namespace Thrustslinger.Gameplay
         [Header("Movement towards player plane")]
         [Tooltip("Units per second the target advances towards the player's plane (along the player's forward normal)")]
         [SerializeField] private float speed = 1.5f;
-        [Tooltip("Anchor for the player plane. Forward defines the plane normal. Defaults to Main Camera if not set.")]
-        [SerializeField] private Transform planeAnchor;
+    [Tooltip("Anchor for the player plane. Forward defines the plane normal. Defaults to Main Camera if not set. If a Plane Provider is assigned, this is ignored.")]
+    [SerializeField] private Transform planeAnchor;
         [Tooltip("Breach threshold along the plane normal (signed distance). Breach occurs when signed distance <= this value.")]
         [SerializeField] private float breachOffset = 0f;
 
@@ -17,7 +18,8 @@ namespace Thrustslinger.Gameplay
     [SerializeField] private bool drawDebug;
     [SerializeField] private bool logBreach = true;
 
-        private Transform _anchor;
+    private Transform _anchor;
+    private IPlaneProvider _plane;
 
         private void OnEnable()
         {
@@ -41,26 +43,38 @@ namespace Thrustslinger.Gameplay
 
         private void Update()
         {
-            if (_anchor == null)
+            Vector3 normal;
+            Vector3 planePoint;
+
+            if (_plane != null)
             {
-                EnsureAnchor();
-                if (_anchor == null) return;
+                normal = _plane.Normal;
+                planePoint = _plane.PlanePoint;
+            }
+            else
+            {
+                if (_anchor == null)
+                {
+                    EnsureAnchor();
+                    if (_anchor == null) return;
+                }
+                normal = _anchor.forward;
+                planePoint = _anchor.position;
             }
 
-            Vector3 normal = _anchor.forward;
             if (normal.sqrMagnitude < 1e-6f) return;
             normal.Normalize();
 
             // Advance towards the player's plane along -normal
             transform.position += -normal * speed * Time.deltaTime;
 
-            // Breach check: signed distance to plane (plane point=_anchor.position, normal=_anchor.forward)
-            float signed = Vector3.Dot(normal, transform.position - _anchor.position);
+            // Breach check: signed distance to plane
+            float signed = Vector3.Dot(normal, transform.position - planePoint);
             if (signed <= breachOffset)
             {
                 if (logBreach)
                 {
-                    string anchorName = _anchor != null ? _anchor.name : "<null>";
+                    string anchorName = _plane != null ? ( _plane is MonoBehaviour mb ? mb.name : "PlaneProvider" ) : (_anchor != null ? _anchor.name : "<null>");
                     Debug.Log($"[TargetMover] Breach: '{name}' crossed plane '{anchorName}' (signed={signed:F3} <= offset={breachOffset:F3}) at t={Time.time:F2}s", this);
                 }
                 var target = GetComponent<Target>();
@@ -81,11 +95,21 @@ namespace Thrustslinger.Gameplay
 #if UNITY_EDITOR
         private void OnDrawGizmosSelected()
         {
-            if (planeAnchor == null) return;
-            var normal = planeAnchor.forward;
+            Vector3 normal;
+            Vector3 point;
+            if (_plane != null)
+            {
+                normal = _plane.Normal;
+                point = _plane.PlanePoint + normal * breachOffset;
+            }
+            else
+            {
+                if (planeAnchor == null) return;
+                normal = planeAnchor.forward;
+                point = planeAnchor.position + normal * breachOffset;
+            }
             if (normal.sqrMagnitude < 1e-6f) return;
             normal.Normalize();
-            var point = planeAnchor.position + normal * breachOffset;
 
             // Draw a small square to visualize the breach plane and a normal ray
             Gizmos.color = new Color(1f, 0f, 0f, 0.25f);
@@ -106,5 +130,16 @@ namespace Thrustslinger.Gameplay
             Gizmos.DrawRay(point, normal * 0.3f);
         }
 #endif
+
+        // Public configuration API for spawners/controllers
+        public void SetPlane(IPlaneProvider plane)
+        {
+            _plane = plane;
+        }
+
+        public void SetSpeed(float mps)
+        {
+            speed = Mathf.Max(0f, mps);
+        }
     }
 }

@@ -49,7 +49,7 @@ namespace Thrustslinger.XR
                 else
                 {
                     // Then, try any scene object that implements IPlaneProvider
-                    foreach (var mb in FindObjectsOfType<MonoBehaviour>())
+                    foreach (var mb in FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None))
                     {
                         if (mb is IPlaneProvider prov)
                         {
@@ -172,6 +172,12 @@ namespace Thrustslinger.XR
 
         public void SetCenter(Vector2 newCenter) => centerOffset = newCenter;
         public void SetHalfExtents(Vector2 newHalfExtents) => halfExtents = new Vector2(Mathf.Max(0, newHalfExtents.x), Mathf.Max(0, newHalfExtents.y));
+
+    // Public accessors for other systems (e.g., spawners)
+    public Vector2 GetHalfExtents() => halfExtents;
+    public Vector2 GetCenterOffset() => centerOffset;
+    public Transform GetBasisTransform() => basisTransform;
+    public MonoBehaviour GetPlaneProviderBehaviour() => planeProviderBehaviour;
 
         private void OnDrawGizmos()
         {
