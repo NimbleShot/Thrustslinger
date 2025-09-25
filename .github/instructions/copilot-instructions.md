@@ -9,7 +9,7 @@
 - Locomotion is plane-locked thrusters (no forward/backward translation). Each physics step: clamp forward velocity, apply forces from palm normals projected onto the plane. Read inputs in `Update`, apply in `FixedUpdate`.
 - Shooting is hitscan from the dominant hand (prototype) with pooled impact VFX/audio. Abstract behind a weapon interface to allow projectile mode later.
 - Enemies are pooled “targets” spawned over time with archetype data (speed/HP/size/breach damage/score mult). Breach events damage the player and despawn targets. Difficulty ramps continuously.
-- Scoring = base × distance × accuracy bucket × combo. Combo increases on hits, resets on miss/damage.
+- Scoring = base × distance × accuracy bucket × multiplier. multiplier increases on each 10 consecutive hits untill x5, resets on miss/damage.
 
 ## Pooling & Player Singleton
 - Object Pooling (required on device):
