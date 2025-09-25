@@ -35,6 +35,18 @@ namespace Thrustslinger.Gameplay
             }
         }
 
+        /// <summary>
+        /// Called when the target breaches the player's plane. For now, we simply despawn.
+        /// Later this should apply player damage via a Health service and notify scoring.
+        /// </summary>
+        public void OnBreach()
+        {
+#if UNITY_EDITOR
+            Debug.Log($"[Target] OnBreach -> despawn '{name}'", this);
+#endif
+            Despawn();
+        }
+
         public void Despawn()
         {
             if (disableInsteadOfDestroy)
