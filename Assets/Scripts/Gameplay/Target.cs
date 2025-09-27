@@ -15,6 +15,7 @@ namespace Thrustslinger.Gameplay
         private Collider _collider;
         private TargetMover _mover;
     private PooledObject _pooledObject;
+    private TargetSpawner _spawner;
 
         private void Awake()
         {
@@ -99,6 +100,8 @@ namespace Thrustslinger.Gameplay
 
             if (context is TargetSpawnContext spawnContext)
             {
+                _spawner = spawnContext.Spawner;
+
                 if (spawnContext.AssignPlane || spawnContext.SpeedOverride > 0f)
                 {
                     var mover = EnsureMover();
@@ -112,6 +115,10 @@ namespace Thrustslinger.Gameplay
                     }
                 }
             }
+            else
+            {
+                _spawner = null;
+            }
         }
 
         public void OnDespawned()
@@ -119,6 +126,12 @@ namespace Thrustslinger.Gameplay
             if (_mover != null)
             {
                 _mover.SetPlane(null);
+            }
+
+            if (_spawner != null)
+            {
+                _spawner.NotifyTargetDespawned(this);
+                _spawner = null;
             }
         }
 

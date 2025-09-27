@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using Thrustslinger.Core;
 using Thrustslinger.XR;
@@ -41,6 +42,14 @@ namespace Thrustslinger.Gameplay
         [Tooltip("Optional override for TargetMover speed on spawned targets (<=0 to keep prefab value)")]
         [SerializeField] private float moverSpeedOverride = 0f;
 
+    [Header("Target Speed")]
+    [Tooltip("Enable dynamic TargetMover speed override using a lerped min/max range over time")]
+    [SerializeField] private bool useDynamicSpeedRange = false;
+    [Tooltip("Initial min/max TargetMover speed (m/s) applied when dynamic speed is enabled")]
+    [SerializeField] private Vector2 speedRangeStart = new Vector2(2f, 3f);
+    [Tooltip("Final min/max TargetMover speed (m/s) reached at maxDifficultyTime")]
+    [SerializeField] private Vector2 speedRangeEnd = new Vector2(6f, 8f);
+
         [Header("Pooling")]
         [Tooltip("Lookup key used when requesting targets from the pool service.")]
         [SerializeField] private string targetPoolKey = "targets.default";
@@ -48,6 +57,10 @@ namespace Thrustslinger.Gameplay
         [SerializeField, Min(0)] private int targetPrewarmCount = 6;
         [Tooltip("Optional parent transform assigned to spawned targets (null = world root).")]
         [SerializeField] private Transform spawnParent;
+
+    [Header("Spawn Limits")]
+    [Tooltip("Maximum number of concurrent active targets (0 = unlimited)")]
+    [SerializeField, Min(0)] private int maxConcurrentTargets = 0;
 
         [Header("Debug")]
         [SerializeField] private bool drawGizmos = true;
@@ -70,9 +83,14 @@ namespace Thrustslinger.Gameplay
         private float _lastDelayChosen;
         private LineRenderer _outlineLR;
         private Material _outlineMaterial;
-    private bool _poolConfigured;
-    private bool _poolPrewarmed;
-    private readonly TargetSpawnContext _spawnContext = new TargetSpawnContext();
+        private bool _poolConfigured;
+        private bool _poolPrewarmed;
+        private readonly TargetSpawnContext _spawnContext = new TargetSpawnContext();
+        private readonly HashSet<Target> _activeTargets = new HashSet<Target>();
+        private Vector2 _lastSpeedRange;
+        private float _lastSpeedChosen;
+
+        private const float CapacityRetryInterval = 0.1f;
 
         private void Awake()
         {
@@ -136,9 +154,19 @@ namespace Thrustslinger.Gameplay
             {
                 float t = Mathf.Clamp01((Time.time - _roundStartTime) / Mathf.Max(0.0001f, maxDifficultyTime));
 
-                // Lerp delay range and spread scale by difficulty t
+                // Lerp delay range by difficulty
                 var delayMin = Mathf.Lerp(delayRangeStart.x, delayRangeEnd.x, t);
                 var delayMax = Mathf.Lerp(delayRangeStart.y, delayRangeEnd.y, t);
+
+                _lastSpeedRange = ComputeSpeedRange(t);
+
+                if (IsAtCapacity())
+                {
+                    var retry = Mathf.Max(0.01f, Mathf.Min(delayMin, CapacityRetryInterval));
+                    yield return new WaitForSeconds(retry);
+                    continue;
+                }
+
                 float delay = Random.Range(delayMin, delayMax);
                 _lastDelayChosen = delay;
 
@@ -146,12 +174,15 @@ namespace Thrustslinger.Gameplay
                 var spreadScale = Vector2.Lerp(spreadScaleStart, spreadScaleEnd, t);
                 var spawnHalf = new Vector2(Mathf.Abs(halfExt.x) * Mathf.Abs(spreadScale.x), Mathf.Abs(halfExt.y) * Mathf.Abs(spreadScale.y));
 
-                SpawnOne(spawnHalf);
+                var speedOverride = ChooseSpeedOverride(_lastSpeedRange);
+                _lastSpeedChosen = speedOverride;
+
+                SpawnOne(spawnHalf, speedOverride);
                 yield return new WaitForSeconds(delay);
             }
         }
 
-        private void SpawnOne(in Vector2 spawnHalfExtents)
+        private void SpawnOne(in Vector2 spawnHalfExtents, float speedOverride)
         {
             var n = _plane.Normal;
             // Build RHS basis using player bounds/basis transform
@@ -172,7 +203,8 @@ namespace Thrustslinger.Gameplay
             _spawnContext.Parent = spawnParent;
             _spawnContext.AssignPlane = assignMoverPlane;
             _spawnContext.Plane = assignMoverPlane ? _plane : null;
-            _spawnContext.SpeedOverride = moverSpeedOverride > 0f ? moverSpeedOverride : 0f;
+            _spawnContext.SpeedOverride = speedOverride > 0f ? speedOverride : 0f;
+            _spawnContext.Spawner = this;
 
             var target = PoolService.Instance.Get<Target>(targetPoolKey, _spawnContext);
             if (target == null)
@@ -181,9 +213,11 @@ namespace Thrustslinger.Gameplay
                 return;
             }
 
+            RegisterActiveTarget(target);
+
             if (logSpawns)
             {
-                Debug.Log($"[TargetSpawner] Spawned '{target.name}' at {spawnPos} (n={n}, rx={rx:F2}, ry={ry:F2})", target);
+                Debug.Log($"[TargetSpawner] Spawned '{target.name}' at {spawnPos} (n={n}, rx={rx:F2}, ry={ry:F2}, speed={speedOverride:F2})", target);
             }
         }
 
@@ -261,6 +295,7 @@ namespace Thrustslinger.Gameplay
             var spread = Vector2.Lerp(spreadScaleStart, spreadScaleEnd, t);
             var half = playerBounds ? playerBounds.GetHalfExtents() : Vector2.zero;
             var spawnHalf = new Vector2(Mathf.Abs(half.x) * Mathf.Abs(spread.x), Mathf.Abs(half.y) * Mathf.Abs(spread.y));
+            var speedRangeForHud = ComputeSpeedRange(t);
 
             string text =
                 $"Difficulty t: {t:F2}\n" +
@@ -268,7 +303,29 @@ namespace Thrustslinger.Gameplay
                 $"Delay range: [{delayMin:F2} .. {delayMax:F2}]s  Last: {_lastDelayChosen:F2}s\n" +
                 $"Spread scale: x={spread.x:F2}, y={spread.y:F2}\n" +
                 $"Spawn half-extents: x={spawnHalf.x:F2}m, y={spawnHalf.y:F2}m\n" +
-                $"Spawn distance: {spawnDistance:F1}m";
+                $"Spawn distance: {spawnDistance:F1}m\n";
+
+            if (maxConcurrentTargets > 0)
+            {
+                text += $"Active targets: {_activeTargets.Count}/{maxConcurrentTargets}\n";
+            }
+            else
+            {
+                text += $"Active targets: {_activeTargets.Count}\n";
+            }
+
+            if (useDynamicSpeedRange)
+            {
+                text += $"Speed range: [{speedRangeForHud.x:F2} .. {speedRangeForHud.y:F2}]m/s  Last: {_lastSpeedChosen:F2}m/s";
+            }
+            else if (moverSpeedOverride > 0f)
+            {
+                text += $"Speed override: {moverSpeedOverride:F2}m/s";
+            }
+            else
+            {
+                text += "Speed override: (prefab)";
+            }
 
             var size = style.CalcSize(new GUIContent(text));
             var rect = new Rect(hudOffset.x, hudOffset.y, Mathf.Max(size.x + 12, 240), size.y + 12);
@@ -370,6 +427,23 @@ namespace Thrustslinger.Gameplay
         {
             // Keep outline width sane
             outlineWidth = Mathf.Max(0.001f, outlineWidth);
+            if (speedRangeStart.x > speedRangeStart.y)
+            {
+                var tmp = speedRangeStart.x;
+                speedRangeStart.x = speedRangeStart.y;
+                speedRangeStart.y = tmp;
+            }
+            if (speedRangeEnd.x > speedRangeEnd.y)
+            {
+                var tmp = speedRangeEnd.x;
+                speedRangeEnd.x = speedRangeEnd.y;
+                speedRangeEnd.y = tmp;
+            }
+            speedRangeStart.x = Mathf.Max(0f, speedRangeStart.x);
+            speedRangeStart.y = Mathf.Max(0f, speedRangeStart.y);
+            speedRangeEnd.x = Mathf.Max(0f, speedRangeEnd.x);
+            speedRangeEnd.y = Mathf.Max(0f, speedRangeEnd.y);
+            maxConcurrentTargets = Mathf.Max(0, maxConcurrentTargets);
             // Try to keep references wired after inspector edits
             if (!Application.isPlaying)
             {
@@ -383,6 +457,71 @@ namespace Thrustslinger.Gameplay
                 ApplyOutlineColor(runtimeRectColor);
                 _outlineLR.enabled = drawRuntimeSpawnArea && useLineRendererForOutline;
             }
+        }
+
+        private Vector2 ComputeSpeedRange(float t)
+        {
+            if (useDynamicSpeedRange)
+            {
+                float min = Mathf.Lerp(speedRangeStart.x, speedRangeEnd.x, t);
+                float max = Mathf.Lerp(speedRangeStart.y, speedRangeEnd.y, t);
+                if (max < min)
+                {
+                    var swap = min;
+                    min = max;
+                    max = swap;
+                }
+                min = Mathf.Max(0f, min);
+                max = Mathf.Max(0f, max);
+                return new Vector2(min, max);
+            }
+
+            if (moverSpeedOverride > 0f)
+            {
+                return new Vector2(moverSpeedOverride, moverSpeedOverride);
+            }
+
+            return Vector2.zero;
+        }
+
+        private float ChooseSpeedOverride(in Vector2 speedRange)
+        {
+            if (useDynamicSpeedRange)
+            {
+                if (speedRange == Vector2.zero)
+                    return 0f;
+                if (Mathf.Approximately(speedRange.x, speedRange.y))
+                    return speedRange.x;
+                return Random.Range(speedRange.x, speedRange.y);
+            }
+
+            if (moverSpeedOverride > 0f)
+            {
+                return moverSpeedOverride;
+            }
+
+            return 0f;
+        }
+
+        private void RegisterActiveTarget(Target target)
+        {
+            if (target == null)
+                return;
+
+            _activeTargets.Add(target);
+        }
+
+        internal void NotifyTargetDespawned(Target target)
+        {
+            if (target == null)
+                return;
+
+            _activeTargets.Remove(target);
+        }
+
+        private bool IsAtCapacity()
+        {
+            return maxConcurrentTargets > 0 && _activeTargets.Count >= maxConcurrentTargets;
         }
 
         private void EnsureOutlineRenderer()

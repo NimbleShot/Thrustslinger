@@ -12,6 +12,7 @@ namespace Thrustslinger.Gameplay
         public IPlaneProvider Plane;
         public float SpeedOverride;
         public bool AssignPlane;
+        public TargetSpawner Spawner;
 
         public void ApplySpawnTransform(Transform instanceTransform)
         {
