@@ -1,9 +1,10 @@
 using UnityEngine;
+using Thrustslinger.Core;
 
 namespace Thrustslinger.Gameplay
 {
     [DisallowMultipleComponent]
-    public class Target : MonoBehaviour
+    public class Target : MonoBehaviour, IPoolable
     {
         [Header("State")]
         [SerializeField] private float maxHp = 1f;
@@ -12,15 +13,18 @@ namespace Thrustslinger.Gameplay
 
         private float _hp;
         private Collider _collider;
+        private TargetMover _mover;
+    private PooledObject _pooledObject;
 
         private void Awake()
         {
             _collider = GetComponent<Collider>();
+            _mover = GetComponent<TargetMover>();
         }
 
         private void OnEnable()
         {
-            _hp = Mathf.Max(1f, maxHp);
+            ResetHp();
         }
 
         /// <summary>
@@ -49,6 +53,9 @@ namespace Thrustslinger.Gameplay
 
         public void Despawn()
         {
+            if (ReleaseToPool())
+                return;
+
             if (disableInsteadOfDestroy)
             {
                 gameObject.SetActive(false);
@@ -83,6 +90,75 @@ namespace Thrustslinger.Gameplay
             radius = Mathf.Max(0.0001f, radius);
 
             return Mathf.Clamp01(toHit.magnitude / radius);
+        }
+
+        public void OnSpawned(object context)
+        {
+            CachePoolBinding();
+            ResetHp();
+
+            if (context is TargetSpawnContext spawnContext)
+            {
+                if (spawnContext.AssignPlane || spawnContext.SpeedOverride > 0f)
+                {
+                    var mover = EnsureMover();
+                    if (mover != null)
+                    {
+                        mover.SetPlane(spawnContext.AssignPlane ? spawnContext.Plane : null);
+                        if (spawnContext.SpeedOverride > 0f)
+                        {
+                            mover.SetSpeed(spawnContext.SpeedOverride);
+                        }
+                    }
+                }
+            }
+        }
+
+        public void OnDespawned()
+        {
+            if (_mover != null)
+            {
+                _mover.SetPlane(null);
+            }
+        }
+
+        private void ResetHp()
+        {
+            _hp = Mathf.Max(1f, maxHp);
+        }
+
+        private TargetMover EnsureMover()
+        {
+            if (_mover == null)
+            {
+                if (!TryGetComponent(out _mover))
+                {
+                    _mover = gameObject.AddComponent<TargetMover>();
+                }
+            }
+
+            return _mover;
+        }
+
+        private void CachePoolBinding()
+        {
+            if (_pooledObject == null)
+            {
+                TryGetComponent(out _pooledObject);
+            }
+        }
+
+        private bool ReleaseToPool()
+        {
+            if (!Application.isPlaying)
+                return false;
+
+            CachePoolBinding();
+            if (_pooledObject == null)
+                return false;
+
+            PoolService.Instance.Release(this);
+            return true;
         }
 
 #if UNITY_EDITOR

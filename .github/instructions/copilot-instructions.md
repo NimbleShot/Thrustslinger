@@ -13,9 +13,25 @@
 
 ## Pooling & Player Singleton
 - Object Pooling (required on device):
-  - Use a centralized PoolService to prewarm and reuse instances for: targets, impact VFX/audio, muzzle flashes, trail renderers, projectiles (future), floating score popups, and any short-lived props.
-  - Never Instantiate/Destroy in the arena loop; allocate up-front in loading or a brief warmup phase. Target zero allocations in `Update`/`FixedUpdate`.
+  - Use the centralized `PoolService` (singleton) to prewarm and reuse instances for: targets, impact VFX/audio, muzzle flashes, trail renderers, projectiles (future), floating score popups, and any short-lived props.
+  - Never `Instantiate`/`Destroy` in the arena loop; allocate up-front during scene load or a brief warmup phase. Target zero allocations in `Update`/`FixedUpdate`.
   - Pooled object lifecycle: `OnSpawned(context)` → active usage → `OnDespawned()`; objects must self-reset and unregister callbacks.
+  - Pools are registered under a hidden `[Pools]` root with per-key containers; pooling APIs are meant for runtime only (`Application.isPlaying`).
+  - APIs (implemented):
+    - `IPoolable { void OnSpawned(object context); void OnDespawned(); }`
+    - `IPoolSpawnContext { void ApplySpawnTransform(Transform instanceTransform); }`
+    - `PoolService` (`Singleton<PoolService>` implementing `IPoolService`):
+      - `T Get<T>(string key = null, object context = null) where T : Component`
+      - `GameObject Get(string key = null, object context = null)`
+      - `void Release(object instance)`
+      - `void Prewarm(string key, int count)`
+      - `void RegisterPrefab(string key, GameObject prefab, int initialSize = 0, Transform containerParent = null)`
+      - `bool Contains(string key)`
+  - Typical spawner usage:
+    - Register in `Awake/OnEnable`: `PoolService.Instance.RegisterPrefab("targets.default", targetPrefab, 0, transform);`
+    - Prewarm: `PoolService.Instance.Prewarm("targets.default", prewarmCount);`
+    - Spawn: `PoolService.Instance.Get<Target>("targets.default", new TargetSpawnContext { Position=pos, Rotation=rot, Parent=parent, Plane=plane, AssignPlane=true, SpeedOverride=speed });`
+    - Despawn from gameplay: `PoolService.Instance.Release(instance)` or via the component’s own `Despawn()` method.
 - Player Singleton:
   - Provide a single authoritative player service accessible via `Player.Instance` (or `IPlayerService` resolved from Core) marked `DontDestroyOnLoad`.
   - Responsibilities: expose XR rig references (hands/controllers, dominant hand), `IPlaneProvider`, health, `Haptics` routing, and key services wiring (Score, Combo).
@@ -37,10 +53,11 @@
 - Score & health:
   - `ScoreService.AddKill(archetype, distance, hitOffset)`; `ComboTracker.RegisterHit()/RegisterBreak()`
 
-- Pooling (new):
+- Pooling (implemented):
   - `IPoolable { void OnSpawned(object context); void OnDespawned(); }`
-  - `PoolService { T Get<T>(string key=null); void Release(object instance); void Prewarm(string key, int count); }`
-  - Keys map to prefab entries; `Prewarm` called at scene load based on config.
+  - `IPoolSpawnContext { void ApplySpawnTransform(Transform instanceTransform); }`
+  - `PoolService` (`IPoolService`): `Get<T>(key, context)`, `Get(key, context)`, `Release(instance)`, `Prewarm(key, count)`, `RegisterPrefab(key, prefab, initialSize = 0, containerParent = null)`, `Contains(key)`.
+  - Keys map to prefab entries; `Prewarm` called at scene load or spawner enable based on config.
 - Player access (new):
   - `Player.Instance` (or `IPlayerService` via Core) exposes: `Transform Head`, `Transform DominantHand`, `IPlaneProvider Plane`, `Health Health`, `Haptics Haptics`, `ComboTracker Combo`, `ScoreService Score`.
   - Use the shared template for implementation: `public sealed class Player : Singleton<Player> { ... }` from `Assets/Scripts/Templetes/Singleton.cs`.
@@ -59,15 +76,17 @@
 - Targets/spawner/difficulty: `Assets/Scripts/Gameplay/`; define per-archetype data as SOs in `Assets/Configs/`, and reference them from spawner configs.
 - Scoring/combo/health: services in `Assets/Scripts/Gameplay/` or `Core/` if shared.
 - UI/HUD: world-space canvases in `Assets/Scripts/UI/`; use XR-compatible ray/laser for menus.
-- Pooling system & Player singleton: `Assets/Scripts/Core/` (e.g., `PoolService`, `IPoolable`, `Player`/`PlayerService`).
-  - Implement `Player` as `Singleton<Player>` using the template at `Assets/Scripts/Templetes/Singleton.cs`. If `PoolService` is a MonoBehaviour bootstrap, `Singleton<PoolService>` is acceptable; otherwise keep it as a plain service instantiated at boot.
+- Pooling system & Player singleton: `Assets/Scripts/Core/` (e.g., `Core/Pooling`: `PoolService`, `IPoolService`, `PooledObject`, `IPoolable`, `IPoolSpawnContext`; and `Player`/`PlayerService`).
+  - Implement `Player` as `Singleton<Player>` using the template at `Assets/Scripts/Templetes/Singleton.cs`. `PoolService` is a `Singleton<PoolService>` MonoBehaviour with a hidden `[Pools]` root.
+  - Spawners typically expose `targetPoolKey`, `targetPrewarmCount`, and `spawnParent`; register and prewarm in `Awake/OnEnable`.
 
 ## Build, test, and debug (developer workflow)
 - Use the Unity Test Framework for EditMode/PlayMode tests under `Assets/Scripts/Tests`. Prefer small PlayMode smoke tests for locomotion, spawner timing, and scoring formulas.
 - For input, keep the action-based rig consistent with `Assets/InputSystem_Actions.inputactions`. Don’t switch to device-based XRI.
 - Profile on Quest: verify single-pass instancing, dynamic resolution, and keep per-frame allocations near zero; prefer GPU instancing for repeated meshes.
-- Add minimal tests for pooling: prewarm creates the correct count; `Get/Release` reuses instances and does not allocate; pooled `Target` resets state on `OnDespawned`.
+- Add minimal tests for pooling: prewarm creates the correct count; `Get/Release` reuses instances and does not allocate; transform context applies correctly; pooled `Target` resets HP and `TargetMover` plane/speed on `OnSpawned/OnDespawned`.
 
 ## Integration checklist when adding features
 - ScriptableObject config created and wired; pooled objects registered/prewarmed; player singleton references assigned where needed; input bound in action maps (if needed); physics layers respected; haptics/audio routed; comfort settings honored; tests cover happy path + one edge case.
  - Use the shared singleton template (`Assets/Scripts/Templetes/Singleton.cs`) for `Player` (and optionally other global services). Ensure `DontDestroyOnLoad` is applied to the Player root.
+  - Pooling integration checklist: pools registered (key→prefab), prewarmed to expected capacity, spawners request via `PoolService.Get<T>(key, context)`, despawn via `PoolService.Release(obj)` or `Target.Despawn()`, and avoid pool calls in edit mode.

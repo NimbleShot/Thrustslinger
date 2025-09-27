@@ -1,5 +1,6 @@
 using System.Collections;
 using UnityEngine;
+using Thrustslinger.Core;
 using Thrustslinger.XR;
 
 namespace Thrustslinger.Gameplay
@@ -40,9 +41,17 @@ namespace Thrustslinger.Gameplay
         [Tooltip("Optional override for TargetMover speed on spawned targets (<=0 to keep prefab value)")]
         [SerializeField] private float moverSpeedOverride = 0f;
 
-    [Header("Debug")] 
-    [SerializeField] private bool drawGizmos = true;
-    [SerializeField] private bool logSpawns = false;
+        [Header("Pooling")]
+        [Tooltip("Lookup key used when requesting targets from the pool service.")]
+        [SerializeField] private string targetPoolKey = "targets.default";
+        [Tooltip("Number of pooled instances to request during prewarm.")]
+        [SerializeField, Min(0)] private int targetPrewarmCount = 6;
+        [Tooltip("Optional parent transform assigned to spawned targets (null = world root).")]
+        [SerializeField] private Transform spawnParent;
+
+        [Header("Debug")]
+        [SerializeField] private bool drawGizmos = true;
+        [SerializeField] private bool logSpawns = false;
 
     [Header("Visualize Difficulty (Runtime)")]
     [Tooltip("Draw the current spawn rectangle at spawn distance every frame (LineRenderer in Game view or Debug.DrawLine if disabled)")] 
@@ -61,15 +70,21 @@ namespace Thrustslinger.Gameplay
         private float _lastDelayChosen;
         private LineRenderer _outlineLR;
         private Material _outlineMaterial;
+    private bool _poolConfigured;
+    private bool _poolPrewarmed;
+    private readonly TargetSpawnContext _spawnContext = new TargetSpawnContext();
 
         private void Awake()
         {
             ResolveReferencesIfNeeded();
+            EnsurePoolSetup();
         }
 
         private void OnEnable()
         {
             ResolveReferencesIfNeeded();
+            EnsurePoolSetup();
+            DoPrewarm();
             _roundStartTime = Time.time;
             StartCoroutine(SpawnLoop());
         }
@@ -80,6 +95,32 @@ namespace Thrustslinger.Gameplay
             if (_outlineLR) _outlineLR.enabled = false;
         }
 
+        private void EnsurePoolSetup()
+        {
+            if (!Application.isPlaying || targetPrefab == null) return;
+
+            var pool = PoolService.Instance;
+            if (!_poolConfigured)
+            {
+                if (!pool.Contains(targetPoolKey))
+                {
+                    pool.RegisterPrefab(targetPoolKey, targetPrefab, 0, transform);
+                }
+
+                _poolConfigured = true;
+            }
+
+            DoPrewarm();
+        }
+
+        private void DoPrewarm()
+        {
+            if (_poolPrewarmed || targetPrewarmCount <= 0 || !Application.isPlaying) return;
+
+            PoolService.Instance.Prewarm(targetPoolKey, targetPrewarmCount);
+            _poolPrewarmed = true;
+        }
+
         private IEnumerator SpawnLoop()
         {
             if (_plane == null || playerBounds == null || targetPrefab == null || basisTransform == null)
@@ -87,6 +128,9 @@ namespace Thrustslinger.Gameplay
                 Debug.LogWarning($"[TargetSpawner] Missing references. plane={(_plane!=null)} bounds={(playerBounds!=null)} prefab={(targetPrefab!=null)} basis={(basisTransform!=null)}. Assign missing fields.", this);
                 yield break;
             }
+
+            EnsurePoolSetup();
+            DoPrewarm();
 
             while (enabled)
             {
@@ -120,22 +164,26 @@ namespace Thrustslinger.Gameplay
             var p0 = _plane.PlanePoint;
             var center = p0 + n * spawnDistance; // in front of the plane along +normal
             var spawnPos = center + axisX * rx + axisY * ry;
+            EnsurePoolSetup();
 
-            var go = Instantiate(targetPrefab, spawnPos, Quaternion.LookRotation(-n, axisY));
-            if (logSpawns)
+            var spawnRot = Quaternion.LookRotation(-n, axisY);
+            _spawnContext.Position = spawnPos;
+            _spawnContext.Rotation = spawnRot;
+            _spawnContext.Parent = spawnParent;
+            _spawnContext.AssignPlane = assignMoverPlane;
+            _spawnContext.Plane = assignMoverPlane ? _plane : null;
+            _spawnContext.SpeedOverride = moverSpeedOverride > 0f ? moverSpeedOverride : 0f;
+
+            var target = PoolService.Instance.Get<Target>(targetPoolKey, _spawnContext);
+            if (target == null)
             {
-                Debug.Log($"[TargetSpawner] Spawned '{go.name}' at {spawnPos} (n={n}, rx={rx:F2}, ry={ry:F2})", this);
+                Debug.LogWarning($"[TargetSpawner] Failed to fetch a pooled target for key '{targetPoolKey}'.", this);
+                return;
             }
 
-            // Optional: wire TargetMover
-            if (assignMoverPlane)
+            if (logSpawns)
             {
-                var mover = go.GetComponent<TargetMover>();
-                if (mover == null) mover = go.AddComponent<TargetMover>();
-                if (moverSpeedOverride > 0f)
-                    mover.SetSpeed(moverSpeedOverride);
-                // assign plane (prefer explicit provider on this spawner)
-                mover.SetPlane(_plane);
+                Debug.Log($"[TargetSpawner] Spawned '{target.name}' at {spawnPos} (n={n}, rx={rx:F2}, ry={ry:F2})", target);
             }
         }
 
