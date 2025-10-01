@@ -9,13 +9,15 @@ namespace Thrustslinger.Gameplay
         [Header("State")]
         [SerializeField] private float maxHp = 1f;
         [SerializeField] private bool disableInsteadOfDestroy = true;
+        [Tooltip("Damage applied to the player if this target breaches the plane.")]
+        [SerializeField, Min(0f)] private float breachDamage = 10f;
         [SerializeField] private Transform center; // optional manual center
 
         private float _hp;
         private Collider _collider;
         private TargetMover _mover;
-    private PooledObject _pooledObject;
-    private TargetSpawner _spawner;
+        private PooledObject _pooledObject;
+        private TargetSpawner _spawner;
 
         private void Awake()
         {
@@ -41,14 +43,16 @@ namespace Thrustslinger.Gameplay
         }
 
         /// <summary>
-        /// Called when the target breaches the player's plane. For now, we simply despawn.
-        /// Later this should apply player damage via a Health service and notify scoring.
+        /// Called when the target breaches the player's plane. Applies player damage then despawns.
         /// </summary>
         public void OnBreach()
         {
 #if UNITY_EDITOR
             Debug.Log($"[Target] OnBreach -> despawn '{name}'", this);
 #endif
+            var damage = Mathf.Max(0f, breachDamage);
+            var manager = GameManager.Instance;
+            manager.NotifyPlaneBreach(damage);
             Despawn();
         }
 

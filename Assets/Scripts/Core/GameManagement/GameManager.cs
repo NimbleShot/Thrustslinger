@@ -131,6 +131,7 @@ namespace Thrustslinger.Core
         private bool _bootComplete;
         private bool _scoreFinalised;
         private float _cachedTimeScale = 1f;
+        private int _breachCount;
         private float _activeDifficultyWarmupSeconds;
         private float _lastKnownHealth;
 
@@ -335,6 +336,8 @@ namespace Thrustslinger.Core
             {
                 _comboTracker?.BreakCombo();
             }
+
+            _breachCount++;
         }
 
         /// <summary>Allows menus to persist newly selected comfort/difficulty before the next run.</summary>
@@ -381,6 +384,7 @@ namespace Thrustslinger.Core
 
             _activeDifficultyWarmupSeconds = context?.difficulty?.warmupSeconds ?? defaultDifficultyWarmupSeconds;
             RunTimeSeconds = 0f;
+            _breachCount = 0;
             _scoreFinalised = false;
             _currentSummary = null;
 
@@ -549,6 +553,7 @@ namespace Thrustslinger.Core
 
             _currentSummary.runTimeSeconds = RunTimeSeconds;
             _currentSummary.difficultyTimeSeconds = DifficultyTimeSeconds;
+            _currentSummary.breaches = _breachCount;
 
             _scoreService?.FinalizeRun(_currentSummary);
             _scoreService?.SubmitResults(_currentSummary);
