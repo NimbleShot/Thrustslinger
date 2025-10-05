@@ -69,6 +69,14 @@ namespace Thrustslinger.Core
         [Tooltip("Optional pools to prewarm during boot.")]
         [SerializeField] private List<PoolWarmupEntry> poolWarmups = new();
 
+    [Header("Debug Controls")]
+    [Tooltip("Draws a temporary on-screen button to start the run when no menu exists yet.")]
+    [SerializeField] private bool showDebugStartButton = true;
+    [Tooltip("Allow a keyboard shortcut to start the run while debugging.")]
+    [SerializeField] private bool allowDebugStartHotkey = true;
+    [Tooltip("Key used to start the run when in MainMenu/Results while debugging.")]
+    [SerializeField] private KeyCode debugStartKey = KeyCode.F5;
+
         [Header("Optional Services")]
         [SerializeField] private MonoBehaviour scoreServiceBehaviour;
         [SerializeField] private MonoBehaviour comboTrackerBehaviour;
@@ -168,6 +176,8 @@ namespace Thrustslinger.Core
 
         private void Update()
         {
+            HandleDebugStartShortcuts();
+
             if (State == GameState.Playing)
             {
                 RunTimeSeconds += Time.unscaledDeltaTime;
@@ -189,6 +199,65 @@ namespace Thrustslinger.Core
                 Resume();
             }
         }
+
+        private void OnGUI()
+        {
+            if (!Application.isPlaying || !showDebugStartButton)
+            {
+                return;
+            }
+
+            if (State != GameState.MainMenu && State != GameState.Results)
+            {
+                return;
+            }
+
+            const float width = 200f;
+            const float height = 36f;
+            var rect = new Rect(12f, Screen.height - height - 12f, width, height);
+            var label = State == GameState.Results ? "Restart Run" : "Start Run";
+
+            if (GUI.Button(rect, label))
+            {
+                StartRun(MenuContext);
+            }
+        }
+
+        private void HandleDebugStartShortcuts()
+        {
+            if (!Application.isPlaying || !allowDebugStartHotkey)
+            {
+                return;
+            }
+
+            if (debugStartKey == KeyCode.None)
+            {
+                return;
+            }
+
+            if (State != GameState.MainMenu && State != GameState.Results)
+            {
+                return;
+            }
+
+            if (Input.GetKeyDown(debugStartKey))
+            {
+                StartRun(MenuContext);
+            }
+        }
+
+#if UNITY_EDITOR
+        [ContextMenu("Start Run (Debug)")]
+        private void EditorContextStartRun()
+        {
+            if (!Application.isPlaying)
+            {
+                return;
+            }
+
+            StartRun(MenuContext);
+        }
+#endif
 
         #endregion
 
