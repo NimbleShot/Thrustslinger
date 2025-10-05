@@ -90,3 +90,111 @@
 - ScriptableObject config created and wired; pooled objects registered/prewarmed; player singleton references assigned where needed; input bound in action maps (if needed); physics layers respected; haptics/audio routed; comfort settings honored; tests cover happy path + one edge case.
  - Use the shared singleton template (`Assets/Scripts/Templetes/Singleton.cs`) for `Player` (and optionally other global services). Ensure `DontDestroyOnLoad` is applied to the Player root.
   - Pooling integration checklist: pools registered (key→prefab), prewarmed to expected capacity, spawners request via `PoolService.Get<T>(key, context)`, despawn via `PoolService.Release(obj)` or `Target.Despawn()`, and avoid pool calls in edit mode.
+
+## Game Manager Lifecycle (Current Implementation)
+The authoritative run lifecycle is owned by `GameManager` located at
+`Assets/Scripts/Core/GameManagement/GameManager.cs`. All gameplay systems must respect its state.
+
+### States
+Boot → MainMenu → Playing ↔ Paused → GameOver → Results
+
+`Results` can transition to `Playing` (Restart) or back to `MainMenu` (Quit). Only the manager
+changes state; other systems listen and react.
+
+### Public API
+- `StartRun(RunContext)` – Begin a new run from MainMenu/Results.
+- `Pause()` / `Resume()` – Toggle paused state (optionally sets `Time.timeScale=0`).
+- `EndRun()` – Force end (health depletion, manual, etc.).
+- `Restart()` – Re-run last `RunContext` from Results/GameOver.
+- `QuitToMenu()` – Abort run and return to MainMenu.
+- `UpdateMenuContext(RunContext)` – Persist comfort/difficulty/menu selections before a run.
+- `RegisterKill(RunKillData)` – Forward kills to score service (future implementation hook).
+- `NotifyPlaneBreach(float damage)` – Apply breach damage + combo break & breach count.
+
+### Events & Observability
+- `OnStateChanged(old, new)` – Subscribe to know when to self-enable/disable.
+- `OnRunStarted(RunContext)` – Raised after warmup when gameplay actually begins.
+- `OnRunCompleted(RunSummary)` – Raised once per run after `EndRun()` finalizes score.
+- UnityEvents in inspector: `onStateEntered`, `onResultsReady` (for UI wiring without code).
+
+### Gated Systems
+Spawner (`TargetSpawner`), thrusters (`ThrusterController`), weapon scripts, haptics routers, and
+any additional gameplay Monobehaviours are enabled only while `State == Playing` (or intentionally
+resumed from Paused). To integrate a new runtime component that should be active only during the
+run, add it to one of:
+- `weaponSystems`
+- `additionalGameplaySystems`
+- `hapticsSystems`
+or introduce a new serialized list in `GameManager` if a distinct category is needed.
+
+Gameplay components should not self-start in `Awake`/`OnEnable`; rely on being enabled by the
+manager. If a component must know state immediately on start-up, query `GameManager.Instance.State`.
+
+### Run & Difficulty Timing
+- `RunTimeSeconds` – Unscaled time while in Playing (excludes pause + pre-warmup).
+- `DifficultyTimeSeconds` – `RunTimeSeconds - warmupSeconds` (never negative). Use for dynamic
+  difficulty curves.
+
+### Warmup
+During `StartRun` a warmup sequence executes: (a) optional pool prewarm passes, (b) physics settle
+delay, (c) comfort settings application & recenter. Only after this does `Playing` state begin.
+
+### Debug Start (Temporary Before Real Menu)
+While building the actual Main Menu, a temporary start control exists:
+- Inspector toggles: `showDebugStartButton`, `allowDebugStartHotkey`.
+- On-screen GUI button (Game view only) or hotkey (default F5) when in `MainMenu` or `Results`.
+- Context menu item: right-click the `GameManager` component → `Start Run (Debug)`.
+Remove or disable these once the real menu flow is implemented.
+
+### Health Integration
+`GameManager` optionally resolves an `IPlayerHealth` (see `PlayerHealth` implementation) via the
+`playerHealthBehaviour` slot. On plane breach, `NotifyPlaneBreach` applies damage; health change
+events break combo on any damage; depletion triggers `EndRun()` exactly once. If no health service
+is assigned, breaches only break combo (no GameOver).
+
+### Breach Tracking
+Each breach increments an internal counter `_breachCount`; stored in `RunSummary.breaches` on
+finalization. Use this for analytics, difficulty adjustments, or end-screen breakdown.
+
+### Scoring / Combo / Haptics (Interfaces)
+The manager talks to optional services via interfaces:
+- `IRunScoreService` – `BeginRun`, `RegisterKill`, `BuildSummary`, `FinalizeRun`, `SubmitResults`.
+- `IComboTracker` – `ResetCombo`, `BreakCombo`.
+- `IRunHapticsRouter` – `SetGameplayEnabled(bool)`.
+Future feature work should implement these separately and assign via inspector; avoid baking
+scoring logic into `GameManager` directly.
+
+### Adding New Gameplay Systems – DOs & DON'Ts
+DO:
+- Subscribe to `OnStateChanged` and enable/disable internal behaviour accordingly if not already
+  in a gated list.
+- Use `RunTimeSeconds` / `DifficultyTimeSeconds` for progressive scaling.
+- Query `CurrentRun` for difficulty or comfort settings instead of storing duplicates.
+
+DON'T:
+- Manually change `GameManager.State` (always call the public API).
+- Start coroutines that assume continuous execution across pause without checking state.
+- Apply damage directly to `PlayerHealth`; funnel through `GameManager.NotifyPlaneBreach` unless
+  it is a non-breach damage source (then still consider centralizing for consistency).
+
+### UI / HUD Integration
+HUD elements should listen to `OnStateChanged` to hide when not Playing/Paused. Results / pause /
+main menu panels are toggled centrally; avoid duplicate show/hide logic. For temporary prototyping,
+hook scoreboard panels into `onResultsReady` UnityEvent.
+
+### Migration Path to Real Menu
+When implementing the proper Main Menu:
+1. Build UI that edits a `RunContext` clone (using existing `MenuContext`).
+2. Call `GameManager.UpdateMenuContext(newContext)` when the player changes settings.
+3. Invoke `StartRun` on play button.
+4. Disable `showDebugStartButton` & hotkey.
+
+### Testing Guidelines
+- Add PlayMode tests validating: state transitions, pause/resume time exclusion, health depletion
+  triggers GameOver, breach counter increments, and gated components disabled outside Playing.
+- Mock or lightweight stub of `IRunScoreService` to verify `FinalizeRun` is called once.
+
+### Future Extensions (Reserved Hooks)
+- Regeneration: implement on `PlayerHealth` and ensure regeneration suspends while Paused.
+- Difficulty injection: spawners to read `GameManager.DifficultyTimeSeconds` instead of `Time.time`.
+- Persistence: `LoadMenuContext` / `SaveMenuContext` placeholders currently no-op.
