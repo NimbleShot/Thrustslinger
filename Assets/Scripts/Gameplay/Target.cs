@@ -12,6 +12,9 @@ namespace Thrustslinger.Gameplay
         [Tooltip("Damage applied to the player if this target breaches the plane.")]
         [SerializeField, Min(0f)] private float breachDamage = 10f;
         [SerializeField] private Transform center; // optional manual center
+    [Header("Scoring")]
+    [Tooltip("Identifier used when reporting kills to the score service.")]
+    [SerializeField] private string archetypeId = "targets.generic";
 
         private float _hp;
         private Collider _collider;
@@ -38,6 +41,7 @@ namespace Thrustslinger.Gameplay
             _hp -= Mathf.Max(0f, damage);
             if (_hp <= 0f)
             {
+                ReportKill(hitPoint);
                 Despawn();
             }
         }
@@ -186,5 +190,52 @@ namespace Thrustslinger.Gameplay
             Gizmos.DrawSphere(c, 0.03f);
         }
 #endif
+
+        private void ReportKill(Vector3 hitPoint)
+        {
+            var manager = GameManager.Instance;
+            if (manager == null || !manager.IsPlaying)
+            {
+                return;
+            }
+
+            var accuracy = ClassifyAccuracyBucket(hitPoint);
+            float distance = 0f;
+            var mainCamera = Camera.main;
+            if (mainCamera != null)
+            {
+                distance = Vector3.Distance(mainCamera.transform.position, transform.position);
+            }
+
+            var killData = new RunKillData(GetArchetypeId(), distance, accuracy, 0f);
+            manager.RegisterKill(killData);
+        }
+
+        private string GetArchetypeId()
+        {
+            return string.IsNullOrWhiteSpace(archetypeId) ? gameObject.name : archetypeId;
+        }
+
+        private HitAccuracyBucket ClassifyAccuracyBucket(Vector3 hitPoint)
+        {
+            var offset = GetHitOffset01(hitPoint);
+
+            if (offset <= 0.1f)
+            {
+                return HitAccuracyBucket.Center;
+            }
+
+            if (offset <= 0.25f)
+            {
+                return HitAccuracyBucket.NearCenter;
+            }
+
+            if (offset <= 0.5f)
+            {
+                return HitAccuracyBucket.Body;
+            }
+
+            return HitAccuracyBucket.Graze;
+        }
     }
 }
