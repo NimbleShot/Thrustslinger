@@ -176,8 +176,6 @@ namespace Thrustslinger.Core
 
         private void Update()
         {
-            HandleDebugStartShortcuts();
-
             if (State == GameState.Playing)
             {
                 RunTimeSeconds += Time.unscaledDeltaTime;
@@ -223,28 +221,6 @@ namespace Thrustslinger.Core
             }
         }
 
-        private void HandleDebugStartShortcuts()
-        {
-            if (!Application.isPlaying || !allowDebugStartHotkey)
-            {
-                return;
-            }
-
-            if (debugStartKey == KeyCode.None)
-            {
-                return;
-            }
-
-            if (State != GameState.MainMenu && State != GameState.Results)
-            {
-                return;
-            }
-
-            if (Input.GetKeyDown(debugStartKey))
-            {
-                StartRun(MenuContext);
-            }
-        }
 
 #if UNITY_EDITOR
         [ContextMenu("Start Run (Debug)")]
