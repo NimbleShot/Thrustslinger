@@ -31,6 +31,22 @@ namespace Thrustslinger.Core
             public int count;
         }
 
+        [Serializable]
+        public struct SceneBindings
+        {
+            public TargetSpawner targetSpawner;
+            public ThrusterController thrusterController;
+            public MonoBehaviour[] weaponSystems;
+            public MonoBehaviour[] additionalGameplaySystems;
+            public MonoBehaviour[] hapticsSystems;
+            public GameObject mainMenuUI;
+            public GameObject hudUI;
+            public GameObject pauseUI;
+            public GameObject resultsUI;
+            public GameObject gameOverUI;
+            public GameObject xrMenuRayRoot;
+        }
+
         #endregion
 
         #region Inspector
@@ -119,6 +135,9 @@ namespace Thrustslinger.Core
 
         /// <summary>Context loaded at boot and edited by the main menu.</summary>
         public RunContext MenuContext => _menuContext ??= new RunContext().EnsureDefaults();
+
+    /// <summary>True once the boot sequence has finished and the manager is in a steady state.</summary>
+    public bool BootComplete => _bootComplete;
 
         #endregion
 
@@ -392,6 +411,49 @@ namespace Thrustslinger.Core
             _menuContext = updated.Clone().EnsureDefaults();
             SaveMenuContext(_menuContext);
             ApplyComfortSettings(_menuContext.comfort);
+            MenuRunContextStore.SetMenuContext(_menuContext);
+        }
+
+        /// <summary>
+        /// Applies scene-specific references (spawners, UI roots, etc.) so the GameManager can control them.
+        /// Call this after loading a gameplay scene.
+        /// </summary>
+        public void ApplySceneBindings(SceneBindings bindings)
+        {
+            targetSpawner = bindings.targetSpawner;
+            thrusterController = bindings.thrusterController;
+            weaponSystems = bindings.weaponSystems ?? Array.Empty<MonoBehaviour>();
+            additionalGameplaySystems = bindings.additionalGameplaySystems ?? Array.Empty<MonoBehaviour>();
+            hapticsSystems = bindings.hapticsSystems ?? Array.Empty<MonoBehaviour>();
+            mainMenuUI = bindings.mainMenuUI;
+            hudUI = bindings.hudUI;
+            pauseUI = bindings.pauseUI;
+            resultsUI = bindings.resultsUI;
+            gameOverUI = bindings.gameOverUI;
+            xrMenuRayRoot = bindings.xrMenuRayRoot;
+
+            CacheGatedSystems();
+            ToggleUIForState(State);
+        }
+
+        /// <summary>
+        /// Clears scene references when a gameplay scene unloads to avoid dangling references.
+        /// </summary>
+        public void ClearSceneBindings()
+        {
+            targetSpawner = null;
+            thrusterController = null;
+            weaponSystems = Array.Empty<MonoBehaviour>();
+            additionalGameplaySystems = Array.Empty<MonoBehaviour>();
+            hapticsSystems = Array.Empty<MonoBehaviour>();
+            mainMenuUI = null;
+            hudUI = null;
+            pauseUI = null;
+            resultsUI = null;
+            gameOverUI = null;
+            xrMenuRayRoot = null;
+
+            CacheGatedSystems();
         }
 
         #endregion
@@ -602,6 +664,7 @@ namespace Thrustslinger.Core
 
             _scoreService?.FinalizeRun(_currentSummary);
             _scoreService?.SubmitResults(_currentSummary);
+            MenuRunContextStore.CacheSummary(_currentSummary);
             _scoreFinalised = true;
         }
 
