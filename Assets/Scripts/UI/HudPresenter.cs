@@ -18,9 +18,9 @@ namespace Thrustslinger.UI
 
         [Header("Data Sources")]
         [Tooltip("Explicit IPlayerHealth provider. If unassigned the first PlayerHealth in the scene is used.")]
-        [SerializeField] private MonoBehaviour healthProviderBehaviour;
-        [Tooltip("Score provider that implements IRuntimeScoreProvider. If null we auto-find RuntimeScoreService.")]
-        [SerializeField] private MonoBehaviour scoreProviderBehaviour;
+    private MonoBehaviour healthProviderBehaviour;
+    [Tooltip("Score provider that implements IRuntimeScoreProvider. If null we auto-find RuntimeScoreService.")]
+    private MonoBehaviour scoreProviderBehaviour;
 
         [Header("Formatting")]
         [SerializeField] private string healthFormat = "Health: {0}/{1}";

@@ -29,6 +29,10 @@ namespace Thrustslinger.XR
     [Header("Debug")]
     [SerializeField] private bool showDebugHUD = false;
     [SerializeField] private bool logWhenNoThrust = false;
+        
+    // Debug HUD placement options (anchor-only)
+    public enum DebugHUDAnchor { TopLeft, TopRight, BottomLeft, BottomRight, Center }
+    [SerializeField] private DebugHUDAnchor debugHUDAnchor = DebugHUDAnchor.TopLeft;
 
         private IPlaneProvider _plane;
         private Rigidbody _rb;
@@ -204,8 +208,48 @@ private XRBaseController leftController;
             v -= Vector3.Dot(v, _plane.Normal) * _plane.Normal;
             var style = new GUIStyle(GUI.skin.label) { fontSize = 14 };
             var txt = $"Thruster Debug\nLGrip: {_leftGrip:F2}  RGrip: {_rightGrip:F2}\nPlanarSpeed: {v.magnitude:F2} m/s\nAccel: {_lastAccel}";
-            GUI.Box(new Rect(10, 10, 280, 72), GUIContent.none);
-            GUI.Label(new Rect(18, 18, 264, 56), txt, style);
+
+            // HUD sizing (local defaults since only anchor is serialized)
+            const int hudWidth = 280;
+            const int hudPadding = 8;
+            var hudOffset = new Vector2(10f, 10f);
+
+            var content = new GUIContent(txt);
+            var innerWidth = Mathf.Max(32, hudWidth - hudPadding * 2);
+            var textHeight = style.CalcHeight(content, innerWidth);
+            var boxHeight = Mathf.CeilToInt(textHeight + hudPadding * 2);
+
+            // Determine position based on anchor
+            float x = 0f, y = 0f;
+            switch (debugHUDAnchor)
+            {
+                case DebugHUDAnchor.TopLeft:
+                    x = hudOffset.x;
+                    y = hudOffset.y;
+                    break;
+                case DebugHUDAnchor.TopRight:
+                    x = Screen.width - hudOffset.x - hudWidth;
+                    y = hudOffset.y;
+                    break;
+                case DebugHUDAnchor.BottomLeft:
+                    x = hudOffset.x;
+                    y = Screen.height - hudOffset.y - boxHeight;
+                    break;
+                case DebugHUDAnchor.BottomRight:
+                    x = Screen.width - hudOffset.x - hudWidth;
+                    y = Screen.height - hudOffset.y - boxHeight;
+                    break;
+                case DebugHUDAnchor.Center:
+                    x = (Screen.width - hudWidth) * 0.5f + hudOffset.x;
+                    y = (Screen.height - boxHeight) * 0.5f + hudOffset.y;
+                    break;
+            }
+
+            var boxRect = new Rect(x, y, hudWidth, boxHeight);
+            var labelRect = new Rect(x + hudPadding, y + hudPadding, innerWidth, textHeight);
+
+            GUI.Box(boxRect, GUIContent.none);
+            GUI.Label(labelRect, txt, style);
         }
     }
 }
