@@ -8,6 +8,9 @@
     },
     {
       "path": "Library/PackageCache"
+    },
+    {
+      "path": "."
     }
   ],
   "settings": {}
