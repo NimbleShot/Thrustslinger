@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace Thrustslinger.Core
 {
@@ -35,6 +36,60 @@ namespace Thrustslinger.Core
             gameObject.name = "[PoolService]";
             DontDestroyOnLoad(gameObject);
             EnsureRootContainer();
+        }
+
+        private void OnEnable()
+        {
+            SceneManager.sceneLoaded += OnSceneLoaded;
+        }
+
+        private void OnDisable()
+        {
+            SceneManager.sceneLoaded -= OnSceneLoaded;
+        }
+
+        private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+        {
+            // When a new scene loads in Single mode, clear all pools since objects are destroyed
+            if (mode == LoadSceneMode.Single)
+            {
+                ClearAllPools();
+            }
+        }
+
+        /// <summary>
+        /// Clears all pooled object references but keeps pool registrations. Called when scenes are loaded.
+        /// </summary>
+        public void ClearAllPools()
+        {
+            foreach (var entry in _pools.Values)
+            {
+                // First, deactivate and return all in-use objects to prevent them appearing in next scene
+                var inUseList = new List<PooledObject>(entry.InUse);
+                foreach (var pooled in inUseList)
+                {
+                    if (pooled != null && pooled.gameObject != null)
+                    {
+                        pooled.gameObject.SetActive(false);
+                        pooled.InvokeDespawned();
+                    }
+                }
+                
+                // Clear queues and sets - objects are already destroyed by scene unload
+                entry.Available.Clear();
+                entry.InUse.Clear();
+                
+                // Destroy the container if it still exists (it might be in a destroyed scene)
+                if (entry.Container != null)
+                {
+                    Destroy(entry.Container.gameObject);
+                    entry.Container = null;
+                }
+            }
+            
+            _lookup.Clear();
+            // NOTE: We keep _pools and _defaultKey intact so registrations persist
+            // The containers will be recreated when objects are spawned again
         }
 
         public bool Contains(string key)
@@ -112,15 +167,35 @@ namespace Thrustslinger.Core
             var entry = ResolveEntry(key);
             if (entry == null) return null;
 
+            // Clean out any destroyed objects from the queue
+            while (entry.Available.Count > 0)
+            {
+                var pooled = entry.Available.Peek();
+                if (pooled == null || pooled.gameObject == null)
+                {
+                    entry.Available.Dequeue();
+                    continue;
+                }
+                break;
+            }
+
             if (entry.Available.Count == 0)
             {
                 entry.Available.Enqueue(CreateInstance(entry));
             }
 
-            var pooled = entry.Available.Dequeue();
-            entry.InUse.Add(pooled);
+            var validPooled = entry.Available.Dequeue();
+            
+            // Final safety check
+            if (validPooled == null || validPooled.gameObject == null)
+            {
+                Debug.LogWarning($"[PoolService] Dequeued a destroyed pooled object from '{key}'. Creating a new instance.", this);
+                validPooled = CreateInstance(entry);
+            }
+            
+            entry.InUse.Add(validPooled);
 
-            var instance = pooled.gameObject;
+            var instance = validPooled.gameObject;
             instance.transform.SetParent(null, false);
 
             if (context is IPoolSpawnContext spawnContext)
@@ -129,7 +204,7 @@ namespace Thrustslinger.Core
             }
 
             instance.SetActive(true);
-            pooled.InvokeSpawned(context);
+            validPooled.InvokeSpawned(context);
 
             return instance;
         }
@@ -234,6 +309,15 @@ namespace Thrustslinger.Core
 
         private PooledObject CreateInstance(PoolEntry entry)
         {
+            // Recreate container if it was destroyed (e.g., after scene transition)
+            if (entry.Container == null)
+            {
+                var container = new GameObject($"{entry.Key}_Pool").transform;
+                container.SetParent(EnsureRootContainer(), false);
+                container.gameObject.hideFlags = HideFlags.DontSave;
+                entry.Container = container;
+            }
+            
             var go = Instantiate(entry.Prefab, entry.Container);
             go.name = $"{entry.Prefab.name}_Pooled";
             var pooled = go.GetComponent<PooledObject>();

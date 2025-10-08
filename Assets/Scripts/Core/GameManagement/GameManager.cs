@@ -5,6 +5,7 @@ using UnityEngine;
 using UnityEngine.Events;
 using Thrustslinger.Gameplay;
 using Thrustslinger.XR;
+using UnityEngine.SceneManagement;
 
 namespace Thrustslinger.Core
 {
@@ -39,6 +40,7 @@ namespace Thrustslinger.Core
             public MonoBehaviour[] weaponSystems;
             public MonoBehaviour[] additionalGameplaySystems;
             public MonoBehaviour[] hapticsSystems;
+            public MonoBehaviour pauseInputController;
             public GameObject mainMenuUI;
             public GameObject hudUI;
             public GameObject pauseUI;
@@ -62,6 +64,8 @@ namespace Thrustslinger.Core
         [SerializeField] private MonoBehaviour[] additionalGameplaySystems;
         [Tooltip("Systems that drive runtime haptics (optional).")]
         [SerializeField] private MonoBehaviour[] hapticsSystems;
+        [Tooltip("Pause input controller that listens for XR pause button (not gated, stays active).")]
+        [SerializeField] private MonoBehaviour pauseInputController;
 
         [Header("UI Routing")]
         [SerializeField] private GameObject mainMenuUI;
@@ -102,6 +106,10 @@ namespace Thrustslinger.Core
         [Header("Unity Events")]
         [SerializeField] private GameStateEvent onStateEntered = new();
         [SerializeField] private RunSummaryEvent onResultsReady = new();
+        
+    [Header("Scene Navigation")]
+    [Tooltip("Name of the main menu scene to load when quitting to menu.")]
+    [SerializeField] private string menuSceneName = "MainMenu";
 
         #endregion
 
@@ -381,6 +389,15 @@ namespace Thrustslinger.Core
             SetState(GameState.MainMenu);
             _currentSummary = null;
             _scoreFinalised = false;
+            // Load the main menu scene
+            if (!string.IsNullOrEmpty(menuSceneName))
+            {
+                SceneManager.LoadScene(menuSceneName, LoadSceneMode.Single);
+            }
+            else
+            {
+                Debug.LogWarning($"[GameManager] menuSceneName is not configured, cannot load main menu.", this);
+            }
         }
 
         /// <summary>Registers a kill so scoring can be aggregated centrally.</summary>
@@ -425,6 +442,7 @@ namespace Thrustslinger.Core
             weaponSystems = bindings.weaponSystems ?? Array.Empty<MonoBehaviour>();
             additionalGameplaySystems = bindings.additionalGameplaySystems ?? Array.Empty<MonoBehaviour>();
             hapticsSystems = bindings.hapticsSystems ?? Array.Empty<MonoBehaviour>();
+            pauseInputController = bindings.pauseInputController;
             mainMenuUI = bindings.mainMenuUI;
             hudUI = bindings.hudUI;
             pauseUI = bindings.pauseUI;
@@ -446,6 +464,7 @@ namespace Thrustslinger.Core
             weaponSystems = Array.Empty<MonoBehaviour>();
             additionalGameplaySystems = Array.Empty<MonoBehaviour>();
             hapticsSystems = Array.Empty<MonoBehaviour>();
+            pauseInputController = null;
             mainMenuUI = null;
             hudUI = null;
             pauseUI = null;
