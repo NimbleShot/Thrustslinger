@@ -25,7 +25,6 @@ namespace Thrustslinger.Gameplay
 
         [Header("Pooling")]
         [SerializeField] private string projectilePoolKey = "projectiles.default";
-        [SerializeField, Min(0)] private int projectilePrewarmCount = 16;
 
         [Header("Firing")]
         [SerializeField, Min(0f)] private float fireRate = 6f;
@@ -42,9 +41,6 @@ namespace Thrustslinger.Gameplay
         [Header("Debug")]
         [SerializeField] private bool logReloads;
         [SerializeField] private bool logShots;
-
-        private bool _poolRegistered;
-        private bool _poolPrewarmed;
 
         private int _currentAmmo;
         private bool _isFiringHeld;
@@ -80,7 +76,6 @@ namespace Thrustslinger.Gameplay
         private void OnEnable()
         {
             ResolveInputActions();
-            EnsurePoolSetup();
             ResetAmmoIfNeeded();
         }
 
@@ -190,27 +185,6 @@ namespace Thrustslinger.Gameplay
             _isFiringHeld = false;
         }
 
-        private void EnsurePoolSetup()
-        {
-            if (!Application.isPlaying || projectilePrefab == null) return;
-
-            var pool = PoolService.Instance;
-            if (!_poolRegistered)
-            {
-                if (!pool.Contains(projectilePoolKey))
-                {
-                    pool.RegisterPrefab(projectilePoolKey, projectilePrefab, 0, projectileSpawnParent ? projectileSpawnParent : transform);
-                }
-                _poolRegistered = true;
-            }
-
-            if (!_poolPrewarmed && projectilePrewarmCount > 0)
-            {
-                pool.Prewarm(projectilePoolKey, projectilePrewarmCount);
-                _poolPrewarmed = true;
-            }
-        }
-
         private void ResetAmmoIfNeeded()
         {
             if (_currentAmmo <= 0)
@@ -241,8 +215,6 @@ namespace Thrustslinger.Gameplay
                 Debug.LogWarning("[ProjectileWeapon] Missing projectile prefab reference.", this);
                 return;
             }
-
-            EnsurePoolSetup();
 
             var origin = muzzle ? muzzle.position : transform.position;
             var forward = muzzle ? muzzle.forward : transform.TransformDirection(localForward);
