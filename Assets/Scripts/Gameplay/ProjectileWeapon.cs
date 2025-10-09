@@ -28,6 +28,8 @@ namespace Thrustslinger.Gameplay
 
         [Header("Firing")]
         [SerializeField, Min(0f)] private float fireRate = 6f;
+        [Tooltip("If true, fire rate only limits continuous fire. Manual trigger pulls ignore fire rate.")]
+        [SerializeField] private bool allowManualRapidFire = true;
         [SerializeField, Min(1)] private int magazineCapacity = 12;
         [SerializeField] private bool autoReloadOnEmpty = true;
 
@@ -46,6 +48,7 @@ namespace Thrustslinger.Gameplay
         private bool _isFiringHeld;
         private bool _isReloading;
         private float _nextFireTime;
+        private bool _triggerWasPressed; // Track trigger state to detect new pulls
 
         private Coroutine _reloadRoutine;
         private float _reloadCompleteTime;
@@ -268,10 +271,19 @@ namespace Thrustslinger.Gameplay
 
         private void OnFirePerformed(InputAction.CallbackContext ctx)
         {
+            var wasPressed = _isFiringHeld;
             _isFiringHeld = ctx.ReadValueAsButton() || ctx.ReadValue<float>() > 0.5f;
             if (!_isFiringHeld) return;
 
-            if (Time.time >= _nextFireTime)
+            // Check if this is a new trigger pull (not held continuously)
+            var isNewPull = !wasPressed && _isFiringHeld;
+            
+            // If manual rapid fire is enabled and this is a new trigger pull, ignore fire rate
+            if (allowManualRapidFire && isNewPull)
+            {
+                TryFire();
+            }
+            else if (Time.time >= _nextFireTime)
             {
                 TryFire();
             }
@@ -294,21 +306,29 @@ namespace Thrustslinger.Gameplay
             if (_currentAmmo >= magazineCapacity) return;
             if (!Application.isPlaying) return;
 
+            StopReloadRoutine(); // Clean up any existing reload first
+            
             _isReloading = true;
-            StopReloadRoutine();
             _reloadCompleteTime = Time.time + reloadDuration;
             _reloadRoutine = StartCoroutine(ReloadRoutine());
 
 #if UNITY_EDITOR
             if (logReloads)
             {
-                Debug.Log($"[ProjectileWeapon] Reload started (duration={reloadDuration:F2}s)", this);
+                Debug.Log($"[ProjectileWeapon] Reload started (duration={reloadDuration:F2}s), _isReloading={_isReloading}", this);
             }
 #endif
         }
 
         private IEnumerator ReloadRoutine()
         {
+#if UNITY_EDITOR
+            if (logReloads)
+            {
+                Debug.Log($"[ProjectileWeapon] ReloadRoutine started, waiting {reloadDuration:F2}s...", this);
+            }
+#endif
+
             if (reloadDuration > 0f)
             {
                 yield return new WaitForSeconds(reloadDuration);
@@ -323,7 +343,7 @@ namespace Thrustslinger.Gameplay
 #if UNITY_EDITOR
             if (logReloads)
             {
-                Debug.Log($"[ProjectileWeapon] Reload complete. Ammo={_currentAmmo}/{magazineCapacity}", this);
+                Debug.Log($"[ProjectileWeapon] Reload complete. Ammo={_currentAmmo}/{magazineCapacity}, _isReloading={_isReloading}", this);
             }
 #endif
         }
@@ -334,10 +354,9 @@ namespace Thrustslinger.Gameplay
             {
                 StopCoroutine(_reloadRoutine);
                 _reloadRoutine = null;
+                _isReloading = false;
+                _reloadCompleteTime = 0f;
             }
-
-            _isReloading = false;
-            _reloadCompleteTime = 0f;
         }
 
         private void EnsureCarrierRigidbody()
