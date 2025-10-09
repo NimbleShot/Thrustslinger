@@ -35,9 +35,9 @@ namespace Thrustslinger.Gameplay
         [Header("Reload")]
         [SerializeField, Min(0f)] private float reloadDuration = 1.5f;
 
-        [Header("Input")]
-        [SerializeField] private InputActionReference fireAction;
-        [SerializeField] private InputActionReference reloadAction;
+    [Header("Input")]
+    [SerializeField] private InputActionProperty fireAction;
+    [SerializeField] private InputActionProperty reloadAction;
 
         [Header("Debug")]
         [SerializeField] private bool logReloads;
@@ -103,8 +103,9 @@ namespace Thrustslinger.Gameplay
         {
             UnbindInputActions();
 
-            _resolvedFireAction = fireAction ? fireAction.action : null;
-            _resolvedReloadAction = reloadAction ? reloadAction.action : null;
+            // InputActionProperty stores either a reference or an inline action. Read the assigned action (may be null).
+            _resolvedFireAction = fireAction.action;
+            _resolvedReloadAction = reloadAction.action;
 
             if (_resolvedFireAction == null)
             {
