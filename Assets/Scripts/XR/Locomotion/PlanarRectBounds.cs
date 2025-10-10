@@ -5,21 +5,15 @@ namespace Thrustslinger.XR
     /// <summary>
     /// Constrains a Rigidbody/Transform to a rectangular area on a locomotion plane ("back plane").
     /// Use with PlanarConstraint + ThrusterController to keep the player within a box-like arena while moving on the plane.
+    /// Dimensions are read from PlayerPlaneDefinition (or any IPlaneProvider that exposes dimensions).
     /// </summary>
     [DisallowMultipleComponent]
     [RequireComponent(typeof(Transform))]
     public class PlanarRectBounds : MonoBehaviour
     {
-        [Header("Plane & Basis")]
-        [SerializeField] private MonoBehaviour planeProviderBehaviour; // IPlaneProvider
-        [Tooltip("Transform whose right/up define in-plane axes after projection.")]
-        [SerializeField] private Transform basisTransform; // optional; if null, uses this.transform
-
-        [Header("Rect (Plane-Space)")]
-        [Tooltip("Half-size of the bounds rectangle along in-plane X (right) and Y (up). Units in meters.")]
-        [SerializeField] private Vector2 halfExtents = new Vector2(5f, 3f);
-        [Tooltip("Center offset from the plane point along in-plane X/Y (meters).")]
-        [SerializeField] private Vector2 centerOffset = Vector2.zero;
+        [Header("Plane Reference")]
+        [Tooltip("PlayerPlaneDefinition component that defines both the plane and its dimensions.")]
+        [SerializeField] private PlayerPlaneDefinition playerPlaneDefinition;
 
         [Header("Behavior")]
         [Tooltip("If true, clamps in FixedUpdate (recommended with Rigidbody).")]
@@ -37,40 +31,26 @@ namespace Thrustslinger.XR
         private void Awake()
         {
             _rb = GetComponent<Rigidbody>();
-            _plane = planeProviderBehaviour as IPlaneProvider;
-
-            // Fallback: try to auto-find a plane provider in scene if none assigned
-            if (_plane == null)
+            
+            // Get plane reference from PlayerPlaneDefinition
+            if (playerPlaneDefinition != null)
             {
-                // First, try local component
-                var local = GetComponent<IPlaneProvider>();
-                if (local != null)
-                    _plane = local;
-                else
+                _plane = playerPlaneDefinition;
+            }
+            else
+            {
+                // Fallback: try to auto-find PlayerPlaneDefinition in scene
+                var planeDef = FindAnyObjectByType<PlayerPlaneDefinition>();
+                if (planeDef != null)
                 {
-                    // Then, try any scene object that implements IPlaneProvider
-                    foreach (var mb in FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None))
-                    {
-                        if (mb is IPlaneProvider prov)
-                        {
-                            _plane = prov;
-                            break;
-                        }
-                    }
+                    playerPlaneDefinition = planeDef;
+                    _plane = planeDef;
+                    Debug.LogWarning($"PlanarRectBounds auto-found PlayerPlaneDefinition on '{planeDef.name}'. Consider assigning it explicitly.", this);
                 }
             }
 
             if (_plane == null)
-                Debug.LogError("PlanarRectBounds could not locate an IPlaneProvider in the scene", this);
-
-            // Basis: if not set, prefer the provider's transform; fallback to self
-            if (basisTransform == null)
-            {
-                if (_plane is MonoBehaviour mb)
-                    basisTransform = mb.transform;
-                if (basisTransform == null)
-                    basisTransform = transform;
-            }
+                Debug.LogError("PlanarRectBounds requires a PlayerPlaneDefinition reference", this);
         }
 
         private void FixedUpdate()
@@ -91,7 +71,11 @@ namespace Thrustslinger.XR
         /// </summary>
         public void ClampToBounds()
         {
-            if (_plane == null) return;
+            if (_plane == null || playerPlaneDefinition == null) return;
+
+            // Get dimensions from PlayerPlaneDefinition
+            var halfExtents = playerPlaneDefinition.HalfExtents;
+            var centerOffset = playerPlaneDefinition.CenterOffset;
 
             // Compute plane basis
             var n = _plane.Normal;
@@ -158,7 +142,8 @@ namespace Thrustslinger.XR
 
         private void GetPlaneAxes(in Vector3 normal, out Vector3 xAxis, out Vector3 yAxis)
         {
-            var refRight = basisTransform ? basisTransform.right : Vector3.right;
+            // Use PlayerPlaneDefinition's transform for basis
+            var refRight = playerPlaneDefinition ? playerPlaneDefinition.transform.right : Vector3.right;
             var xProj = Vector3.ProjectOnPlane(refRight, normal);
             if (xProj.sqrMagnitude < 1e-6f)
             {
@@ -170,24 +155,22 @@ namespace Thrustslinger.XR
             yAxis = Vector3.Cross(normal, xAxis).normalized; // ensures RHS basis
         }
 
-        public void SetCenter(Vector2 newCenter) => centerOffset = newCenter;
-        public void SetHalfExtents(Vector2 newHalfExtents) => halfExtents = new Vector2(Mathf.Max(0, newHalfExtents.x), Mathf.Max(0, newHalfExtents.y));
-
-    // Public accessors for other systems (e.g., spawners)
-    public Vector2 GetHalfExtents() => halfExtents;
-    public Vector2 GetCenterOffset() => centerOffset;
-    public Transform GetBasisTransform() => basisTransform;
-    public MonoBehaviour GetPlaneProviderBehaviour() => planeProviderBehaviour;
+        // Public accessors for backward compatibility with TargetSpawner
+        public Vector2 GetHalfExtents() => playerPlaneDefinition ? playerPlaneDefinition.HalfExtents : Vector2.zero;
+        public Vector2 GetCenterOffset() => playerPlaneDefinition ? playerPlaneDefinition.CenterOffset : Vector2.zero;
+        public Transform GetBasisTransform() => playerPlaneDefinition ? playerPlaneDefinition.transform : transform;
 
         private void OnDrawGizmos()
         {
-            if (!drawGizmos) return;
-            var plane = planeProviderBehaviour as IPlaneProvider;
-            if (plane == null) return;
+            if (!drawGizmos || playerPlaneDefinition == null) return;
+
+            var plane = playerPlaneDefinition;
+            var halfExtents = plane.HalfExtents;
+            var centerOffset = plane.CenterOffset;
 
             var n = plane.Normal;
             GetPlaneAxes(n, out var axisX, out var axisY);
-            var p0 = Application.isPlaying ? plane.PlanePoint : (plane.PlanePoint);
+            var p0 = Application.isPlaying ? plane.PlanePoint : plane.PlanePoint;
             var center = p0 + axisX * centerOffset.x + axisY * centerOffset.y;
 
             var hx = halfExtents.x;

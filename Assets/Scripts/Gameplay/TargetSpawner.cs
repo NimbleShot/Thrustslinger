@@ -9,12 +9,16 @@ namespace Thrustslinger.Gameplay
     [DisallowMultipleComponent]
     public class TargetSpawner : MonoBehaviour
     {
-        [Header("Plane & Bounds")]
-        [Tooltip("The player plane provider (use StaticPlaneProvider on your PlayerPlane object)")]
+        [Header("Plane & Bounds (Simplified)")]
+        [Tooltip("RECOMMENDED: Assign PlayerPlaneDefinition for automatic plane + dimensions. Overrides individual settings below.")]
+        [SerializeField] private PlayerPlaneDefinition playerPlaneDefinition;
+
+        [Header("Plane & Bounds (Legacy)")]
+        [Tooltip("The player plane provider (use StaticPlaneProvider on your PlayerPlane object). Ignored if playerPlaneDefinition is set.")]
         [SerializeField] private MonoBehaviour planeProviderBehaviour; // IPlaneProvider
-        [Tooltip("Rect bounds to match spawn area size to the player's movement area")]
+        [Tooltip("Rect bounds to match spawn area size to the player's movement area. Ignored if playerPlaneDefinition is set.")]
         [SerializeField] private PlanarRectBounds playerBounds;
-        [Tooltip("Transform used to define in-plane axes (usually the PlayerPlane transform)")]
+        [Tooltip("Transform used to define in-plane axes (usually the PlayerPlane transform). Ignored if playerPlaneDefinition is set.")]
         [SerializeField] private Transform basisTransform; // if null, use playerBounds.basis
 
         [Header("Spawn Distance")] 
@@ -108,9 +112,19 @@ namespace Thrustslinger.Gameplay
 
         private IEnumerator SpawnLoop()
         {
-            if (_plane == null || playerBounds == null || targetPrefab == null || basisTransform == null)
+            // PlayerPlaneDefinition can replace plane+bounds+basis, so validate accordingly
+            bool hasPlaneDefinition = playerPlaneDefinition != null;
+            bool hasLegacySetup = _plane != null && basisTransform != null;
+            
+            if (!hasPlaneDefinition && !hasLegacySetup)
             {
-                Debug.LogWarning($"[TargetSpawner] Missing references. plane={(_plane!=null)} bounds={(playerBounds!=null)} prefab={(targetPrefab!=null)} basis={(basisTransform!=null)}. Assign missing fields.", this);
+                Debug.LogWarning($"[TargetSpawner] Missing references. Either assign PlayerPlaneDefinition OR (plane + basis). plane={(_plane!=null)} basis={(basisTransform!=null)} planeDef={(playerPlaneDefinition!=null)}", this);
+                yield break;
+            }
+
+            if (targetPrefab == null)
+            {
+                Debug.LogWarning("[TargetSpawner] No targetPrefab assigned.", this);
                 yield break;
             }
 
@@ -134,7 +148,7 @@ namespace Thrustslinger.Gameplay
                 float delay = Random.Range(delayMin, delayMax);
                 _lastDelayChosen = delay;
 
-                var halfExt = playerBounds.GetHalfExtents();
+                var halfExt = GetPlayerHalfExtents();
                 var spreadScale = Vector2.Lerp(spreadScaleStart, spreadScaleEnd, t);
                 var spawnHalf = new Vector2(Mathf.Abs(halfExt.x) * Mathf.Abs(spreadScale.x), Mathf.Abs(halfExt.y) * Mathf.Abs(spreadScale.y));
 
@@ -187,7 +201,7 @@ namespace Thrustslinger.Gameplay
         private void LateUpdate()
         {
             // In case references were assigned after enable, try resolving lazily
-            if (_plane == null || playerBounds == null || basisTransform == null)
+            if (_plane == null || basisTransform == null)
             {
                 ResolveReferencesIfNeeded();
             }
@@ -203,7 +217,7 @@ namespace Thrustslinger.Gameplay
             GetPlaneAxes(n, out var axisX, out var axisY);
             var p0 = _plane.PlanePoint;
             var center = p0 + n * spawnDistance;
-            var halfPlayer = playerBounds.GetHalfExtents();
+            var halfPlayer = GetPlayerHalfExtents();
             var spread = Vector2.Lerp(spreadScaleStart, spreadScaleEnd, t);
             var spawnHalf = new Vector2(Mathf.Abs(halfPlayer.x) * Mathf.Abs(spread.x), Mathf.Abs(halfPlayer.y) * Mathf.Abs(spread.y));
 
@@ -256,7 +270,7 @@ namespace Thrustslinger.Gameplay
             var delayMin = Mathf.Lerp(delayRangeStart.x, delayRangeEnd.x, t);
             var delayMax = Mathf.Lerp(delayRangeStart.y, delayRangeEnd.y, t);
             var spread = Vector2.Lerp(spreadScaleStart, spreadScaleEnd, t);
-            var half = playerBounds ? playerBounds.GetHalfExtents() : Vector2.zero;
+            var half = GetPlayerHalfExtents();
             var spawnHalf = new Vector2(Mathf.Abs(half.x) * Mathf.Abs(spread.x), Mathf.Abs(half.y) * Mathf.Abs(spread.y));
             var speedRangeForHud = ComputeSpeedRange(t);
 
@@ -297,6 +311,17 @@ namespace Thrustslinger.Gameplay
 
         private void ResolveReferencesIfNeeded()
         {
+            // If PlayerPlaneDefinition is assigned, use it as single source of truth
+            if (playerPlaneDefinition != null)
+            {
+                _plane = playerPlaneDefinition;
+                basisTransform = playerPlaneDefinition.transform;
+                // Note: playerBounds can be null when using PlayerPlaneDefinition directly
+                // We'll read dimensions from PlayerPlaneDefinition.HalfExtents instead
+                return;
+            }
+
+            // Legacy path: resolve individual components
             // Plane
             if (_plane == null)
             {
@@ -329,6 +354,20 @@ namespace Thrustslinger.Gameplay
                         basisTransform = mb.transform;
                 }
             }
+        }
+
+        /// <summary>
+        /// Get player plane half extents from PlayerPlaneDefinition (preferred) or PlanarRectBounds (legacy).
+        /// </summary>
+        private Vector2 GetPlayerHalfExtents()
+        {
+            if (playerPlaneDefinition != null)
+                return playerPlaneDefinition.HalfExtents;
+            
+            if (playerBounds != null)
+                return playerBounds.GetHalfExtents();
+            
+            return Vector2.zero;
         }
 
         private void GetPlaneAxes(in Vector3 normal, out Vector3 xAxis, out Vector3 yAxis)
