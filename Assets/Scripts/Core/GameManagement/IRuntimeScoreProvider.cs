@@ -15,5 +15,9 @@ namespace Thrustslinger.Core
 
         /// <summary>Total confirmed kills recorded for the active run.</summary>
         int KillCount { get; }
+
+        /// <summary>The highest score achieved across all runs.</summary>
+        float HighScore { get; }
     }
 }
+

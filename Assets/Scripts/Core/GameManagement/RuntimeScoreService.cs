@@ -29,12 +29,22 @@ namespace Thrustslinger.Core
         [SerializeField] private bool logKillEvents;
         [SerializeField] private bool logSubmissions;
 
+        [Header("High Score Persistence")]
+        [SerializeField] private bool trackHighScore = true;
+        [SerializeField] private string highScorePrefsKey = "Thrustslinger_HighScore";
+
         private readonly List<RunKillData> _killLog = new();
 
         public event Action<float> ScoreChanged;
 
         public float CurrentScore { get; private set; }
         public int KillCount => _killLog.Count;
+        public float HighScore { get; private set; }
+
+        private void Awake()
+        {
+            LoadHighScore();
+        }
 
         public void ResetScore()
         {
@@ -94,6 +104,13 @@ namespace Thrustslinger.Core
             summary.targetsDestroyed = KillCount;
             summary.accuracy = ComputeAverageAccuracy();
             summary.killLog = new List<RunKillData>(_killLog);
+
+            // Check and update high score
+            if (trackHighScore && CurrentScore > HighScore)
+            {
+                HighScore = CurrentScore;
+                SaveHighScore();
+            }
         }
 
         public void SubmitResults(RunSummary summary)
@@ -105,6 +122,28 @@ namespace Thrustslinger.Core
                     : $"score={CurrentScore:F0} kills={KillCount}";
                 Debug.Log($"[RuntimeScoreService] SubmitResults -> {status}");
             }
+        }
+
+        private void LoadHighScore()
+        {
+            if (!trackHighScore)
+            {
+                HighScore = 0f;
+                return;
+            }
+
+            HighScore = PlayerPrefs.GetFloat(highScorePrefsKey, 0f);
+        }
+
+        private void SaveHighScore()
+        {
+            if (!trackHighScore)
+            {
+                return;
+            }
+
+            PlayerPrefs.SetFloat(highScorePrefsKey, HighScore);
+            PlayerPrefs.Save();
         }
 
         private float GetAccuracyMultiplier(HitAccuracyBucket accuracy)
@@ -140,5 +179,29 @@ namespace Thrustslinger.Core
                 _ => 0.5f
             };
         }
+
+#if UNITY_EDITOR
+        [ContextMenu("Clear High Score")]
+        private void ClearHighScore()
+        {
+            if (!trackHighScore)
+            {
+                Debug.LogWarning("[RuntimeScoreService] High score tracking is disabled.", this);
+                return;
+            }
+
+            if (PlayerPrefs.HasKey(highScorePrefsKey))
+            {
+                PlayerPrefs.DeleteKey(highScorePrefsKey);
+                PlayerPrefs.Save();
+                HighScore = 0f;
+                Debug.Log($"[RuntimeScoreService] High score cleared from PlayerPrefs key: {highScorePrefsKey}", this);
+            }
+            else
+            {
+                Debug.Log("[RuntimeScoreService] No high score found to clear.", this);
+            }
+        }
+#endif
     }
 }

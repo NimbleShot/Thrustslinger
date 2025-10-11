@@ -71,11 +71,11 @@ namespace Thrustslinger.Core
                 yield break;
             }
 
-            // GameManager only allows StartRun from MainMenu/Results. Wait until it's in a valid state.
-            if (_gameManager.State != GameState.MainMenu && _gameManager.State != GameState.Results)
+            // GameManager only allows StartRun from MainMenu/GameOver. Wait until it's in a valid state.
+            if (_gameManager.State != GameState.MainMenu && _gameManager.State != GameState.GameOver)
             {
                 yield return new WaitUntil(() =>
-                    _gameManager.State == GameState.MainMenu || _gameManager.State == GameState.Results);
+                    _gameManager.State == GameState.MainMenu || _gameManager.State == GameState.GameOver);
             }
 
             _gameManager.StartRun(pendingContext);

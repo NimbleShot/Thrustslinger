@@ -128,7 +128,7 @@ namespace Thrustslinger.UI
 
         private void HandleStateChanged(GameState previous, GameState current)
         {
-            if (current == GameState.MainMenu || current == GameState.Results)
+            if (current == GameState.MainMenu || current == GameState.GameOver)
             {
                 _currentScore = _scoreProvider?.CurrentScore ?? 0f;
                 UpdateScoreText();

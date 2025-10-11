@@ -84,8 +84,6 @@ namespace Thrustslinger.Core
         [SerializeField, Min(0f)] private float defaultDifficultyWarmupSeconds = 5f;
         [Tooltip("Seconds to let physics settle during warmup before enabling gameplay.")]
         [SerializeField, Min(0f)] private float physicsSettleSeconds = 0.25f;
-        [Tooltip("Delay in seconds before showing the results screen after GameOver.")]
-        [SerializeField, Min(0f)] private float resultsDelaySeconds = 1.25f;
         [Tooltip("Optional pools to prewarm during boot.")]
         [SerializeField] private List<PoolWarmupEntry> poolWarmups = new();
 
@@ -161,7 +159,6 @@ namespace Thrustslinger.Core
         private RunContext _menuContext;
         private RunSummary _currentSummary;
         private Coroutine _runRoutine;
-        private Coroutine _resultsRoutine;
         private bool _autoPausedByFocus;
         private bool _bootComplete;
         private bool _scoreFinalised;
@@ -232,7 +229,7 @@ namespace Thrustslinger.Core
                 return;
             }
 
-            if (State != GameState.MainMenu && State != GameState.Results)
+            if (State != GameState.MainMenu && State != GameState.GameOver)
             {
                 return;
             }
@@ -240,7 +237,7 @@ namespace Thrustslinger.Core
             const float width = 200f;
             const float height = 36f;
             var rect = new Rect(12f, Screen.height - height - 12f, width, height);
-            var label = State == GameState.Results ? "Restart Run" : "Start Run";
+            var label = State == GameState.GameOver ? "Restart Run" : "Start Run";
 
             if (GUI.Button(rect, label))
             {
@@ -267,11 +264,11 @@ namespace Thrustslinger.Core
         #region Public API
 
         /// <summary>
-        /// Starts a new run from the provided context. Valid from MainMenu or Results.
+        /// Starts a new run from the provided context. Valid from MainMenu or GameOver.
         /// </summary>
         public void StartRun(RunContext context)
         {
-            if (State != GameState.MainMenu && State != GameState.Results)
+            if (State != GameState.MainMenu && State != GameState.GameOver)
             {
                 Debug.LogWarning($"[GameManager] StartRun ignored while in state {State}.", this);
                 return;
@@ -346,24 +343,20 @@ namespace Thrustslinger.Core
 
             SetGatedSystemsActive(false);
             _hapticsRouter?.SetGameplayEnabled(false);
+            
+            // Finalize score BEFORE changing state so listeners can access the summary
+            FinaliseScore();
+            
             ToggleUIForState(GameState.GameOver);
             SetState(GameState.GameOver);
-
-            FinaliseScore();
+            
             OnRunCompleted?.Invoke(_currentSummary);
-
-            if (_resultsRoutine != null)
-            {
-                StopCoroutine(_resultsRoutine);
-            }
-
-            _resultsRoutine = StartCoroutine(ResultsTransitionRoutine());
         }
 
         /// <summary>Restarts the last run using the same context.</summary>
         public void Restart()
         {
-            if (State != GameState.Results && State != GameState.GameOver)
+            if (State != GameState.GameOver)
             {
                 Debug.LogWarning($"[GameManager] Restart ignored while in state {State}.", this);
                 return;
@@ -687,32 +680,15 @@ namespace Thrustslinger.Core
             _scoreFinalised = true;
         }
 
-        private IEnumerator ResultsTransitionRoutine()
-        {
-            if (resultsDelaySeconds > 0f)
-            {
-                var elapsed = 0f;
-                while (elapsed < resultsDelaySeconds)
-                {
-                    elapsed += Time.unscaledDeltaTime;
-                    yield return null;
-                }
-            }
-
-            ToggleUIForState(GameState.Results);
-            SetState(GameState.Results);
-            onResultsReady.Invoke(_currentSummary);
-        }
-
         private void ToggleUIForState(GameState state)
         {
             if (mainMenuUI) mainMenuUI.SetActive(state == GameState.MainMenu);
             if (hudUI) hudUI.SetActive(state == GameState.Playing || state == GameState.Paused);
             if (pauseUI) pauseUI.SetActive(state == GameState.Paused);
-            if (resultsUI) resultsUI.SetActive(state == GameState.Results);
+            if (resultsUI) resultsUI.SetActive(false); // Deprecated - use gameOverUI instead
             if (gameOverUI) gameOverUI.SetActive(state == GameState.GameOver);
 
-            var enableMenuRay = state == GameState.MainMenu || state == GameState.Results || state == GameState.Paused;
+            var enableMenuRay = state == GameState.MainMenu || state == GameState.GameOver || state == GameState.Paused;
             SetMenuRayActive(enableMenuRay);
         }
 
@@ -737,12 +713,6 @@ namespace Thrustslinger.Core
             {
                 StopCoroutine(_runRoutine);
                 _runRoutine = null;
-            }
-
-            if (_resultsRoutine != null)
-            {
-                StopCoroutine(_resultsRoutine);
-                _resultsRoutine = null;
             }
         }
 
