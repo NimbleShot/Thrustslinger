@@ -43,6 +43,14 @@ namespace Thrustslinger.XR
     private InputAction _rightGripBtnFallback;
     private Vector3 _lastAccel;
 
+        // Audio state
+        private AudioSource _leftAudioSource;
+        private AudioSource _rightAudioSource;
+        private float _leftTargetVolume;
+        private float _rightTargetVolume;
+        private float _leftTargetPitch;
+        private float _rightTargetPitch;
+
 
 #if UNITY_XR_INTERACTION_TOOLKIT
 [Header("Optional Haptics")] [SerializeField]
@@ -59,6 +67,19 @@ private XRBaseController leftController;
             _plane = planeProviderBehaviour as IPlaneProvider;
             if (_plane == null)
                 Debug.LogError("ThrusterController requires planeProviderBehaviour implementing IPlaneProvider");
+
+            // Setup audio sources on controller transforms
+            if (config != null && config.thrustLoopClip != null)
+            {
+                if (leftHand != null)
+                {
+                    _leftAudioSource = SetupAudioSource(leftHand.gameObject, "LeftThrusterAudio");
+                }
+                if (rightHand != null)
+                {
+                    _rightAudioSource = SetupAudioSource(rightHand.gameObject, "RightThrusterAudio");
+                }
+            }
         }
 
 
@@ -106,6 +127,9 @@ private XRBaseController leftController;
             if (rg <= 0f && _rightGripBtnFallback != null && _rightGripBtnFallback.IsPressed()) rg = 1f;
             _leftGrip = Mathf.Clamp01(lg);
             _rightGrip = Mathf.Clamp01(rg);
+
+            // Update audio based on grip intensity
+            UpdateThrusterAudio();
         }
 
 
@@ -180,6 +204,100 @@ private XRBaseController leftController;
             else if (hand == rightHand && rightController)
                 rightController.SendHapticImpulse(amplitude, duration);
 #endif
+        }
+
+
+        private AudioSource SetupAudioSource(GameObject parent, string sourceName)
+        {
+            // Check if audio source already exists (e.g., from previous runs)
+            var existing = parent.GetComponentInChildren<AudioSource>();
+            if (existing != null && existing.gameObject.name == sourceName)
+            {
+                ConfigureAudioSource(existing);
+                return existing;
+            }
+
+            // Create new audio source as child
+            var audioObj = new GameObject(sourceName);
+            audioObj.transform.SetParent(parent.transform, false);
+            audioObj.transform.localPosition = Vector3.zero;
+            
+            var audioSource = audioObj.AddComponent<AudioSource>();
+            ConfigureAudioSource(audioSource);
+            
+            return audioSource;
+        }
+
+        private void ConfigureAudioSource(AudioSource source)
+        {
+            if (config == null || config.thrustLoopClip == null) return;
+
+            source.clip = config.thrustLoopClip;
+            source.loop = true;
+            source.playOnAwake = false;
+            source.spatialBlend = 1f; // 3D spatial audio
+            source.volume = 0f;
+            source.pitch = 1f;
+            source.minDistance = 0.1f;
+            source.maxDistance = 10f;
+            source.rolloffMode = AudioRolloffMode.Linear;
+        }
+
+        private void UpdateThrusterAudio()
+        {
+            if (config == null || config.thrustLoopClip == null) return;
+
+            var dz = Mathf.Clamp01(config.gripDeadZone);
+            
+            // Calculate target audio parameters for each hand
+            UpdateHandAudio(_leftAudioSource, _leftGrip, dz, ref _leftTargetVolume, ref _leftTargetPitch);
+            UpdateHandAudio(_rightAudioSource, _rightGrip, dz, ref _rightTargetVolume, ref _rightTargetPitch);
+        }
+
+        private void UpdateHandAudio(AudioSource audioSource, float grip, float deadZone, ref float targetVolume, ref float targetPitch)
+        {
+            if (audioSource == null) return;
+
+            // Check if grip is above dead zone
+            if (grip <= deadZone)
+            {
+                targetVolume = 0f;
+                targetPitch = config.minPitch;
+                
+                if (audioSource.isPlaying)
+                {
+                    // Smoothly fade out
+                    audioSource.volume = Mathf.Lerp(audioSource.volume, 0f, Time.deltaTime * config.audioSmoothingSpeed);
+                    if (audioSource.volume < 0.01f)
+                    {
+                        audioSource.Stop();
+                        audioSource.volume = 0f;
+                    }
+                }
+                return;
+            }
+
+            // Normalize grip [deadZone..1] -> [0..1]
+            var normalizedGrip = Mathf.InverseLerp(deadZone, 1f, grip);
+            
+            // Calculate volume with curve
+            var volumeMultiplier = config.volumeCurve?.Evaluate(normalizedGrip) ?? normalizedGrip;
+            targetVolume = Mathf.Lerp(config.minVolume, config.maxVolume, volumeMultiplier);
+            
+            // Calculate pitch
+            targetPitch = Mathf.Lerp(config.minPitch, config.maxPitch, normalizedGrip);
+
+            // Start playing if not already
+            if (!audioSource.isPlaying)
+            {
+                audioSource.volume = 0f; // Start from zero for smooth fade-in
+                audioSource.Play();
+            }
+
+            // Smoothly interpolate to target values
+            var smoothSpeed = config.audioSmoothingSpeed * Time.deltaTime;
+            audioSource.volume = Mathf.Lerp(audioSource.volume, targetVolume, smoothSpeed);
+            audioSource.pitch = Mathf.Lerp(audioSource.pitch, targetPitch, smoothSpeed);
         }
 
 
