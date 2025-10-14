@@ -36,6 +36,22 @@ namespace Thrustslinger.Gameplay
         [Header("Reload")]
         [SerializeField, Min(0f)] private float reloadDuration = 1.5f;
 
+        [Header("Audio")]
+        [Tooltip("Audio clip played when firing. One-shot sound effect.")]
+        [SerializeField] private AudioClip fireSound;
+        
+        [Tooltip("Optional audio clip played when reload starts.")]
+        [SerializeField] private AudioClip reloadSound;
+        
+        [Tooltip("Volume for weapon sounds (0-1).")]
+        [SerializeField, Range(0f, 1f)] private float audioVolume = 0.7f;
+        
+        [Tooltip("Optional pitch randomization range. Adds variety to repeated shots.")]
+        [SerializeField, Range(0f, 0.3f)] private float pitchVariation = 0.05f;
+        
+        [Tooltip("Transform where audio originates. Defaults to muzzle, then weapon transform.")]
+        [SerializeField] private Transform audioSourceTransform;
+
     [Header("Input")]
     [SerializeField] private InputActionProperty fireAction;
     [SerializeField] private InputActionProperty reloadAction;
@@ -60,6 +76,9 @@ namespace Thrustslinger.Gameplay
 
         private readonly ProjectileSpawnContext _spawnContext = new();
 
+        // Audio state
+        private AudioSource _audioSource;
+
         public int CurrentAmmo => _currentAmmo;
         public int MagazineCapacity => magazineCapacity;
         public bool IsReloading => _isReloading;
@@ -74,6 +93,7 @@ namespace Thrustslinger.Gameplay
 
             _currentAmmo = Mathf.Max(1, magazineCapacity);
             EnsureCarrierRigidbody();
+            SetupAudioSource();
         }
 
         private void OnEnable()
@@ -256,6 +276,9 @@ namespace Thrustslinger.Gameplay
             _currentAmmo = Mathf.Max(0, _currentAmmo - 1);
             _nextFireTime = Time.time + (fireRate > 0f ? 1f / fireRate : 0.1f);
 
+            // Play fire sound
+            PlayFireSound();
+
 #if UNITY_EDITOR
             if (logShots)
             {
@@ -278,12 +301,9 @@ namespace Thrustslinger.Gameplay
             // Check if this is a new trigger pull (not held continuously)
             var isNewPull = !wasPressed && _isFiringHeld;
             
-            // If manual rapid fire is enabled and this is a new trigger pull, ignore fire rate
+            // Only fire from OnFirePerformed if it's a new manual pull with rapid fire enabled
+            // Otherwise, let Update() handle continuous fire with fire rate limiting
             if (allowManualRapidFire && isNewPull)
-            {
-                TryFire();
-            }
-            else if (Time.time >= _nextFireTime)
             {
                 TryFire();
             }
@@ -311,6 +331,9 @@ namespace Thrustslinger.Gameplay
             _isReloading = true;
             _reloadCompleteTime = Time.time + reloadDuration;
             _reloadRoutine = StartCoroutine(ReloadRoutine());
+
+            // Play reload sound
+            PlayReloadSound();
 
 #if UNITY_EDITOR
             if (logReloads)
@@ -363,6 +386,53 @@ namespace Thrustslinger.Gameplay
         {
             if (carrierRigidbody != null) return;
             carrierRigidbody = GetComponentInParent<Rigidbody>();
+        }
+
+        private void SetupAudioSource()
+        {
+            // Determine audio source location (priority: explicit transform > muzzle > weapon itself)
+            var sourceTransform = audioSourceTransform != null ? audioSourceTransform : 
+                                  muzzle != null ? muzzle : transform;
+
+            // Check if audio source already exists on the target transform
+            _audioSource = sourceTransform.GetComponent<AudioSource>();
+            
+            if (_audioSource == null)
+            {
+                // Create new audio source on the chosen transform
+                _audioSource = sourceTransform.gameObject.AddComponent<AudioSource>();
+            }
+
+            // Configure for 3D positional audio with one-shot playback
+            _audioSource.playOnAwake = false;
+            _audioSource.loop = false;
+            _audioSource.spatialBlend = 1f; // Full 3D
+            _audioSource.volume = audioVolume;
+            _audioSource.minDistance = 0.5f;
+            _audioSource.maxDistance = 25f;
+            _audioSource.rolloffMode = AudioRolloffMode.Linear;
+        }
+
+        private void PlayFireSound()
+        {
+            if (_audioSource == null || fireSound == null) return;
+
+            // Apply pitch variation for variety
+            var basePitch = 1f;
+            var randomPitch = basePitch + Random.Range(-pitchVariation, pitchVariation);
+            _audioSource.pitch = Mathf.Clamp(randomPitch, 0.5f, 2f);
+
+            // Play one-shot so rapid fire can layer sounds
+            _audioSource.PlayOneShot(fireSound, audioVolume);
+        }
+
+        private void PlayReloadSound()
+        {
+            if (_audioSource == null || reloadSound == null) return;
+
+            // Reset pitch to normal for reload sound
+            _audioSource.pitch = 1f;
+            _audioSource.PlayOneShot(reloadSound, audioVolume);
         }
     }
 }
