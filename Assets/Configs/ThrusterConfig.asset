@@ -41,3 +41,33 @@ MonoBehaviour:
     m_PostInfinity: 2
     m_RotationOrder: 4
   thrustGizmoColor: {r: 1, g: 0.6, b: 0.2, a: 0.8}
+  thrustLoopClip: {fileID: 8300000, guid: 0d21a3c8f57fd0544adc4df4653df743, type: 3}
+  minVolume: 0.1
+  maxVolume: 0.8
+  volumeCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 1
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
+  minPitch: 0.8
+  maxPitch: 1.2
+  audioSmoothingSpeed: 10
