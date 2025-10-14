@@ -12,25 +12,23 @@ namespace Thrustslinger.Effects
     public class PlanarRectWalls : MonoBehaviour
     {
         [Header("References")]
-        [Tooltip("Back-plane provider; auto-found if not assigned.")]
-        [SerializeField] private MonoBehaviour planeProviderBehaviour; // IPlaneProvider
-        [Tooltip("Planar rect bounds to follow; auto-found if not assigned.")]
-        [SerializeField] private MonoBehaviour boundsBehaviour; // PlanarRectBounds
+        [Tooltip("PlayerPlaneDefinition that defines both the plane and its dimensions; auto-found if not assigned.")]
+        [SerializeField] private Thrustslinger.XR.PlayerPlaneDefinition playerPlaneDefinition;
 
-        [Header("Appearance")]
+        [Header("Material")]
+        [Tooltip("Material to use for the walls. Required.")]
+        [SerializeField] private Material wallMaterial;
+        
+        [Header("Dimensions")]
         [SerializeField, Min(0.1f)] private float wallHeight = 2.2f;
-        [SerializeField] private Color tint = new Color(0.65f, 0.95f, 1f, 0.18f);
-        [SerializeField, Range(0f, 1f)] private float smoothness = 0.9f;
-        [SerializeField, Range(0f, 1f)] private float metallic = 0.05f;
-        [Tooltip("Optional material override; leave null to auto-create a URP Lit Transparent material.")]
-        [SerializeField] private Material materialOverride;
+        [Tooltip("Offset along the plane normal (positive = towards targets, negative = behind player).")]
+        [SerializeField] private float normalOffset = 0f;
+        [Tooltip("Distance to push walls outward from the boundary edges (prevents walls from disappearing when player gets close).")]
+        [SerializeField, Min(0f)] private float edgeOffset = 0.5f;
 
         [Header("Options")]
         [SerializeField] private bool drawEdgeGizmos = true;
 
-        private Thrustslinger.XR.IPlaneProvider _plane;
-        private Thrustslinger.XR.PlanarRectBounds _bounds;
-        private Material _sharedMat;
         private static Mesh s_Quad;
 
         private Transform _left, _right, _top, _bottom;
@@ -38,6 +36,8 @@ namespace Thrustslinger.Effects
         private Vector2 _prevCenter;
         private Vector3 _prevPlanePoint;
         private Vector3 _prevNormal;
+        private float _prevNormalOffset;
+        private float _prevEdgeOffset;
 
         private void OnEnable()
         {
@@ -69,23 +69,20 @@ namespace Thrustslinger.Effects
 
         private void ResolveRefs()
         {
-            _plane = planeProviderBehaviour as Thrustslinger.XR.IPlaneProvider;
-            if (_plane == null)
+            if (playerPlaneDefinition == null)
             {
-                // Try find in scene
-                foreach (var mb in FindObjectsOfType<MonoBehaviour>())
+                // Auto-find PlayerPlaneDefinition in scene
+                playerPlaneDefinition = FindFirstObjectByType<Thrustslinger.XR.PlayerPlaneDefinition>();
+                if (playerPlaneDefinition != null)
                 {
-                    if (mb is Thrustslinger.XR.IPlaneProvider prov)
-                    {
-                        _plane = prov;
-                        break;
-                    }
+                    Debug.LogWarning($"PlanarRectWalls auto-found PlayerPlaneDefinition on '{playerPlaneDefinition.name}'. Consider assigning it explicitly.", this);
                 }
             }
 
-            _bounds = boundsBehaviour as Thrustslinger.XR.PlanarRectBounds;
-            if (_bounds == null)
-                _bounds = FindObjectOfType<Thrustslinger.XR.PlanarRectBounds>();
+            if (wallMaterial == null)
+            {
+                Debug.LogError("PlanarRectWalls requires a Wall Material to be assigned.", this);
+            }
         }
 
         private void EnsureWalls()
@@ -106,7 +103,7 @@ namespace Thrustslinger.Effects
                 var mf = go.AddComponent<MeshFilter>();
                 var mr = go.AddComponent<MeshRenderer>();
                 mf.sharedMesh = GetQuad();
-                mr.sharedMaterial = materialOverride ? materialOverride : GetOrCreateMaterial();
+                mr.sharedMaterial = wallMaterial;
                 t = go.transform;
             }
             else
@@ -116,47 +113,21 @@ namespace Thrustslinger.Effects
                 mf.sharedMesh = GetQuad();
                 var mr = t.GetComponent<MeshRenderer>();
                 if (mr == null) mr = t.gameObject.AddComponent<MeshRenderer>();
-                mr.sharedMaterial = materialOverride ? materialOverride : GetOrCreateMaterial();
+                mr.sharedMaterial = wallMaterial;
             }
             return t;
         }
 
         private void ApplyMaterial()
         {
-            var mat = materialOverride ? materialOverride : GetOrCreateMaterial();
+            if (wallMaterial == null) return;
+            
             foreach (var t in new[] { _left, _right, _top, _bottom })
             {
                 if (t == null) continue;
                 var mr = t.GetComponent<MeshRenderer>();
-                if (mr) mr.sharedMaterial = mat;
+                if (mr) mr.sharedMaterial = wallMaterial;
             }
-        }
-
-        private Material GetOrCreateMaterial()
-        {
-            if (_sharedMat != null) return _sharedMat;
-            var shader = Shader.Find("Universal Render Pipeline/Lit");
-            if (shader == null)
-            {
-                Debug.LogWarning("URP/Lit shader not found. Using Standard shader as fallback.");
-                shader = Shader.Find("Standard");
-            }
-            _sharedMat = new Material(shader)
-            {
-                name = "AcrylicWalls (Auto)"
-            };
-
-            // Configure for transparent acrylic look (URP Lit)
-            _sharedMat.SetColor("_BaseColor", tint);
-            _sharedMat.SetFloat("_Smoothness", smoothness);
-            _sharedMat.SetFloat("_Metallic", metallic);
-
-            // URP Lit transparency setup
-            _sharedMat.SetFloat("_Surface", 1f); // Transparent
-            _sharedMat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
-            _sharedMat.SetFloat("_ZWrite", 0f);
-            _sharedMat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
-            return _sharedMat;
         }
 
         private static Mesh GetQuad()
@@ -187,28 +158,34 @@ namespace Thrustslinger.Effects
         private void UpdateWalls(bool force)
         {
             ResolveRefs();
-            if (_plane == null || _bounds == null)
+            if (playerPlaneDefinition == null || wallMaterial == null)
                 return;
 
-            var n = _plane.Normal;
-            GetPlaneAxes(n, _bounds, out var axisX, out var axisY);
+            var n = playerPlaneDefinition.Normal;
+            GetPlaneAxes(n, out var axisX, out var axisY);
 
-            // Derive rect params
-            var half = GetHalfExtents(_bounds);
-            var center = GetCenterOffset(_bounds);
-            var p0 = _plane.PlanePoint;
+            // Get dimensions directly from PlayerPlaneDefinition
+            var half = playerPlaneDefinition.HalfExtents;
+            var center = playerPlaneDefinition.CenterOffset;
+            var p0 = playerPlaneDefinition.PlanePoint;
 
             bool changed = force ||
                            half != _prevHalfExtents ||
                            center != _prevCenter ||
                            p0 != _prevPlanePoint ||
-                           n != _prevNormal;
+                           n != _prevNormal ||
+                           !Mathf.Approximately(normalOffset, _prevNormalOffset) ||
+                           !Mathf.Approximately(edgeOffset, _prevEdgeOffset);
 
             if (!changed) return;
 
-            var centerWorld = p0 + axisX * center.x + axisY * center.y;
-            var hx = half.x;
-            var hy = half.y;
+            // Apply normal offset to shift walls along plane normal (Z-axis in plane space)
+            var offsetP0 = p0 + n * normalOffset;
+            var centerWorld = offsetP0 + axisX * center.x + axisY * center.y;
+            
+            // Apply edge offset to push walls outward from boundary
+            var hx = half.x + edgeOffset;
+            var hy = half.y + edgeOffset;
 
             // Left/Right walls: width along axisY, height along n, forward points inward (+X for left, -X for right)
             PositionWall(_left, centerWorld + axisX * (-hx), width: hy * 2f, height: wallHeight, widthDir: axisY, upDir: n, forward: axisX);
@@ -222,6 +199,8 @@ namespace Thrustslinger.Effects
             _prevCenter = center;
             _prevPlanePoint = p0;
             _prevNormal = n;
+            _prevNormalOffset = normalOffset;
+            _prevEdgeOffset = edgeOffset;
         }
 
         private static void PositionWall(Transform wall, Vector3 center, float width, float height, Vector3 widthDir, Vector3 upDir, Vector3 forward)
@@ -232,27 +211,10 @@ namespace Thrustslinger.Effects
             wall.localScale = new Vector3(width, height, 1f);
         }
 
-        private static Vector2 GetHalfExtents(Thrustslinger.XR.PlanarRectBounds b)
+        private void GetPlaneAxes(in Vector3 normal, out Vector3 xAxis, out Vector3 yAxis)
         {
-            // Access via reflection to keep fields private; fallback to serialized copy if needed
-            var fi = typeof(Thrustslinger.XR.PlanarRectBounds).GetField("halfExtents", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            if (fi != null) return (Vector2)fi.GetValue(b);
-            return new Vector2(5f, 3f);
-        }
-
-        private static Vector2 GetCenterOffset(Thrustslinger.XR.PlanarRectBounds b)
-        {
-            var fi = typeof(Thrustslinger.XR.PlanarRectBounds).GetField("centerOffset", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            if (fi != null) return (Vector2)fi.GetValue(b);
-            return Vector2.zero;
-        }
-
-        private static void GetPlaneAxes(in Vector3 normal, Thrustslinger.XR.PlanarRectBounds bounds, out Vector3 xAxis, out Vector3 yAxis)
-        {
-            // Try to use the same basis as bounds for consistency by peeking into its basisTransform
-            var fi = typeof(Thrustslinger.XR.PlanarRectBounds).GetField("basisTransform", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            Transform basis = fi != null ? (Transform)fi.GetValue(bounds) : null;
-            var refRight = basis ? basis.right : Vector3.right;
+            // Use PlayerPlaneDefinition's transform for consistent basis
+            var refRight = playerPlaneDefinition ? playerPlaneDefinition.transform.right : Vector3.right;
             var xProj = Vector3.ProjectOnPlane(refRight, normal);
             if (xProj.sqrMagnitude < 1e-6f)
             {
@@ -265,24 +227,57 @@ namespace Thrustslinger.Effects
 
         private void OnDrawGizmos()
         {
-            if (!drawEdgeGizmos || _plane == null || _bounds == null) return;
-            var n = _plane.Normal;
-            GetPlaneAxes(n, _bounds, out var axisX, out var axisY);
-            var p0 = _plane.PlanePoint;
-            var half = GetHalfExtents(_bounds);
-            var center = GetCenterOffset(_bounds);
-            var centerWorld = p0 + axisX * center.x + axisY * center.y;
-            var hx = half.x; var hy = half.y;
+            if (!drawEdgeGizmos || playerPlaneDefinition == null) return;
+            var n = playerPlaneDefinition.Normal;
+            GetPlaneAxes(n, out var axisX, out var axisY);
+            var p0 = Application.isPlaying ? playerPlaneDefinition.PlanePoint : playerPlaneDefinition.PlanePoint;
+            var half = playerPlaneDefinition.HalfExtents;
+            var center = playerPlaneDefinition.CenterOffset;
+            
+            // Apply normal offset to gizmo visualization
+            var offsetP0 = p0 + n * normalOffset;
+            var centerWorld = offsetP0 + axisX * center.x + axisY * center.y;
+            
+            // Apply edge offset to show actual wall positions
+            var hx = half.x + edgeOffset;
+            var hy = half.y + edgeOffset;
+            
             var c0 = centerWorld + axisX * (-hx) + axisY * (-hy);
             var c1 = centerWorld + axisX * ( hx) + axisY * (-hy);
             var c2 = centerWorld + axisX * ( hx) + axisY * ( hy);
             var c3 = centerWorld + axisX * (-hx) + axisY * ( hy);
             var prev = Gizmos.color;
-            Gizmos.color = new Color(tint.r, tint.g, tint.b, 1f);
+            
+            // Use material color if available
+            if (wallMaterial != null && wallMaterial.HasProperty("_BaseColor"))
+            {
+                var gizmoColor = wallMaterial.GetColor("_BaseColor");
+                Gizmos.color = new Color(gizmoColor.r, gizmoColor.g, gizmoColor.b, 1f);
+            }
+            else if (wallMaterial != null && wallMaterial.HasProperty("_Color"))
+            {
+                var gizmoColor = wallMaterial.GetColor("_Color");
+                Gizmos.color = new Color(gizmoColor.r, gizmoColor.g, gizmoColor.b, 1f);
+            }
+            else
+            {
+                Gizmos.color = new Color(0.65f, 0.95f, 1f, 1f); // Default cyan
+            }
+            
             Gizmos.DrawLine(c0, c1);
             Gizmos.DrawLine(c1, c2);
             Gizmos.DrawLine(c2, c3);
             Gizmos.DrawLine(c3, c0);
+            
+            // Draw normal offset indicator if offset is non-zero
+            if (!Mathf.Approximately(normalOffset, 0f))
+            {
+                Gizmos.color = Color.yellow;
+                var originalCenter = p0 + axisX * center.x + axisY * center.y;
+                Gizmos.DrawLine(originalCenter, centerWorld);
+                Gizmos.DrawWireSphere(centerWorld, 0.1f);
+            }
+            
             Gizmos.color = prev;
         }
     }
