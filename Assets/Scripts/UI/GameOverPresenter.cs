@@ -44,6 +44,7 @@ namespace Thrustslinger.UI
 
         private GameManager _gameManager;
         private IRuntimeScoreProvider _scoreProvider;
+        private PlayerFacingMenuPositioner _menuPositioner;
 
         private void Awake()
         {
@@ -73,6 +74,9 @@ namespace Thrustslinger.UI
             {
                 returnToMenuButton.onClick.AddListener(HandleReturnToMenuClicked);
             }
+
+            // Get menu positioner component if present
+            _menuPositioner = GetComponent<PlayerFacingMenuPositioner>();
 
             // Initial state - hide the panel
             SetPanelVisible(false);
@@ -137,6 +141,12 @@ namespace Thrustslinger.UI
             if (uiPanel != null && uiPanel.activeSelf != visible)
             {
                 uiPanel.SetActive(visible);
+
+                // Update menu position when becoming visible
+                if (visible && _menuPositioner != null)
+                {
+                    _menuPositioner.UpdatePosition();
+                }
             }
         }
 

@@ -20,6 +20,7 @@ namespace Thrustslinger.UI
         [SerializeField] private string mainMenuSceneName = "MainMenu";
 
         private GameManager _gameManager;
+        private PlayerFacingMenuPositioner _menuPositioner;
 
         private void Awake()
         {
@@ -41,6 +42,25 @@ namespace Thrustslinger.UI
             {
                 quitToMainMenuButton.onClick.AddListener(HandleQuitToMainMenuClicked);
             }
+
+            // Get menu positioner component if present
+            _menuPositioner = GetComponent<PlayerFacingMenuPositioner>();
+        }
+
+        private void OnEnable()
+        {
+            if (_gameManager != null)
+            {
+                _gameManager.OnStateChanged += HandleStateChanged;
+            }
+        }
+
+        private void OnDisable()
+        {
+            if (_gameManager != null)
+            {
+                _gameManager.OnStateChanged -= HandleStateChanged;
+            }
         }
 
         private void OnDestroy()
@@ -53,6 +73,15 @@ namespace Thrustslinger.UI
             if (quitToMainMenuButton != null)
             {
                 quitToMainMenuButton.onClick.RemoveListener(HandleQuitToMainMenuClicked);
+            }
+        }
+
+        private void HandleStateChanged(GameState previous, GameState current)
+        {
+            // Update menu position when entering pause state
+            if (current == GameState.Paused && _menuPositioner != null)
+            {
+                _menuPositioner.UpdatePosition();
             }
         }
 
