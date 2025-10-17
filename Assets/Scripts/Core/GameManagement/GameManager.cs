@@ -58,6 +58,8 @@ namespace Thrustslinger.Core
         [SerializeField] private TargetSpawner targetSpawner;
         [Tooltip("Thruster locomotion controller (plane locked).")]
         [SerializeField] private ThrusterController thrusterController;
+        [Tooltip("Player plane definition (used for recentering).")]
+        [SerializeField] private PlayerPlaneDefinition playerPlaneDefinition;
         [Tooltip("Weapon systems that should be toggled when entering/leaving gameplay.")]
         [SerializeField] private MonoBehaviour[] weaponSystems;
         [Tooltip("Other gameplay scripts that must be active only during Playing.")]
@@ -341,8 +343,12 @@ namespace Thrustslinger.Core
                 Time.timeScale = 1f;
             }
 
+            // Keep gated systems disabled so player doesn't drift
             SetGatedSystemsActive(false);
             _hapticsRouter?.SetGameplayEnabled(false);
+            
+            // Stop player movement by freezing the rigidbody if thruster controller exists
+            FreezePlayerMovement();
             
             // Finalize score BEFORE changing state so listeners can access the summary
             FinaliseScore();
@@ -362,6 +368,7 @@ namespace Thrustslinger.Core
                 return;
             }
 
+            // Note: Unfreezing and recentering are handled in BeginRunRoutine
             var restartContext = CurrentRun?.Clone() ?? MenuContext.Clone();
             StartRun(restartContext);
         }
@@ -378,6 +385,10 @@ namespace Thrustslinger.Core
 
             SetGatedSystemsActive(false);
             _hapticsRouter?.SetGameplayEnabled(false);
+            
+            // Unfreeze player movement before transitioning to menu
+            UnfreezePlayerMovement();
+            
             ToggleUIForState(GameState.MainMenu);
             SetState(GameState.MainMenu);
             _currentSummary = null;
@@ -513,6 +524,9 @@ namespace Thrustslinger.Core
             _lastKnownHealth = _playerHealth?.CurrentHealth ?? float.NaN;
 
             ApplyComfortSettings(context.comfort);
+            
+            // Unfreeze player movement and recenter to start position
+            UnfreezePlayerMovement();
             RecenterRig();
 
             yield return PrewarmPools();
@@ -733,9 +747,69 @@ namespace Thrustslinger.Core
             // TODO: Pipe through to locomotion, vignette, handedness, and other comfort systems.
         }
 
+        /// <summary>
+        /// Recenters the player rig to the center of the plane bounds.
+        /// Useful for restart to ensure player starts from a consistent position.
+        /// </summary>
         private void RecenterRig()
         {
-            // TODO: Integrate with XR rig recenter or plane alignment service.
+            if (thrusterController == null || playerPlaneDefinition == null) return;
+
+            var rb = thrusterController.GetComponent<Rigidbody>();
+            if (rb == null) return;
+
+            // Calculate center of the plane in world space
+            var planePoint = playerPlaneDefinition.PlanePoint;
+            var normal = playerPlaneDefinition.Normal;
+            var centerOffset = playerPlaneDefinition.CenterOffset;
+
+            // Get plane axes
+            var refRight = playerPlaneDefinition.transform.right;
+            var xAxis = Vector3.ProjectOnPlane(refRight, normal).normalized;
+            var yAxis = Vector3.Cross(normal, xAxis).normalized;
+
+            // Calculate world position at the center of the bounds
+            var centerPosition = planePoint + xAxis * centerOffset.x + yAxis * centerOffset.y;
+
+            // Temporarily make kinematic for clean teleport, then restore
+            var wasKinematic = rb.isKinematic;
+            rb.isKinematic = true;
+            
+            // Clear velocities and set position
+            rb.linearVelocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+            rb.position = centerPosition;
+            
+            // Restore kinematic state
+            rb.isKinematic = wasKinematic;
+        }
+
+        private void FreezePlayerMovement()
+        {
+            if (thrusterController == null) return;
+            
+            var rb = thrusterController.GetComponent<Rigidbody>();
+            if (rb != null)
+            {
+                // Stop all movement and freeze the rigidbody
+                rb.linearVelocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+                rb.isKinematic = true;
+            }
+        }
+
+        private void UnfreezePlayerMovement()
+        {
+            if (thrusterController == null) return;
+            
+            var rb = thrusterController.GetComponent<Rigidbody>();
+            if (rb != null)
+            {
+                // Restore rigidbody to dynamic state
+                rb.isKinematic = false;
+                rb.linearVelocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+            }
         }
 
         #endregion
