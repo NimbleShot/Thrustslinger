@@ -41,10 +41,8 @@ namespace Thrustslinger.Core
             public MonoBehaviour[] additionalGameplaySystems;
             public MonoBehaviour[] hapticsSystems;
             public MonoBehaviour pauseInputController;
-            public GameObject mainMenuUI;
             public GameObject hudUI;
             public GameObject pauseUI;
-            public GameObject resultsUI;
             public GameObject gameOverUI;
             public GameObject xrMenuRayRoot;
         }
@@ -69,13 +67,11 @@ namespace Thrustslinger.Core
         [Tooltip("Pause input controller that listens for XR pause button (not gated, stays active).")]
         [SerializeField] private MonoBehaviour pauseInputController;
 
-        [Header("UI Routing")]
-        [SerializeField] private GameObject mainMenuUI;
-        [SerializeField] private GameObject hudUI;
-        [SerializeField] private GameObject pauseUI;
-        [SerializeField] private GameObject resultsUI;
-        [SerializeField] private GameObject gameOverUI;
-        [SerializeField] private GameObject xrMenuRayRoot;
+    [Header("UI Routing")]
+    [SerializeField] private GameObject hudUI;
+    [SerializeField] private GameObject pauseUI;
+    [SerializeField] private GameObject gameOverUI;
+    [SerializeField] private GameObject xrMenuRayRoot;
 
         [Header("Lifecycle Settings")]
         [Tooltip("Automatically pause the run when application focus is lost.")]
@@ -447,10 +443,8 @@ namespace Thrustslinger.Core
             additionalGameplaySystems = bindings.additionalGameplaySystems ?? Array.Empty<MonoBehaviour>();
             hapticsSystems = bindings.hapticsSystems ?? Array.Empty<MonoBehaviour>();
             pauseInputController = bindings.pauseInputController;
-            mainMenuUI = bindings.mainMenuUI;
             hudUI = bindings.hudUI;
             pauseUI = bindings.pauseUI;
-            resultsUI = bindings.resultsUI;
             gameOverUI = bindings.gameOverUI;
             xrMenuRayRoot = bindings.xrMenuRayRoot;
 
@@ -469,10 +463,8 @@ namespace Thrustslinger.Core
             additionalGameplaySystems = Array.Empty<MonoBehaviour>();
             hapticsSystems = Array.Empty<MonoBehaviour>();
             pauseInputController = null;
-            mainMenuUI = null;
             hudUI = null;
             pauseUI = null;
-            resultsUI = null;
             gameOverUI = null;
             xrMenuRayRoot = null;
 
@@ -696,10 +688,8 @@ namespace Thrustslinger.Core
 
         private void ToggleUIForState(GameState state)
         {
-            if (mainMenuUI) mainMenuUI.SetActive(state == GameState.MainMenu);
             if (hudUI) hudUI.SetActive(state == GameState.Playing || state == GameState.Paused);
             if (pauseUI) pauseUI.SetActive(state == GameState.Paused);
-            if (resultsUI) resultsUI.SetActive(false); // Deprecated - use gameOverUI instead
             if (gameOverUI) gameOverUI.SetActive(state == GameState.GameOver);
 
             var enableMenuRay = state == GameState.MainMenu || state == GameState.GameOver || state == GameState.Paused;
