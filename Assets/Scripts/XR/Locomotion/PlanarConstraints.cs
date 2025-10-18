@@ -30,6 +30,9 @@ private void FixedUpdate()
 {
 if (_plane == null) return;
 
+// Skip constraint updates when rigidbody is kinematic
+// (e.g., during pause or when frozen)
+if (_rb.isKinematic) return;
 
 var n = _plane.Normal;
 

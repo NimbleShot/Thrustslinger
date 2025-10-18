@@ -216,6 +216,18 @@ namespace Thrustslinger.Gameplay
             }
         }
 
+        /// <summary>
+        /// Resets weapon state to initial conditions. Called by GameManager when starting a new run.
+        /// Stops any active reload and restores full magazine.
+        /// </summary>
+        public void ResetWeapon()
+        {
+            StopReloadRoutine();
+            _currentAmmo = Mathf.Max(1, magazineCapacity);
+            _isFiringHeld = false;
+            _nextFireTime = 0f;
+        }
+
         private void TryFire()
         {
             if (_isReloading) return;

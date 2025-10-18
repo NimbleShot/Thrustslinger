@@ -272,6 +272,8 @@ namespace Thrustslinger.Core
                 return;
             }
 
+            Debug.Log($"[GameManager] StartRun() called from state {State}", this);
+
             var sourceContext = context != null ? context.Clone() : MenuContext.Clone();
             CurrentRun = sourceContext.EnsureDefaults();
 
@@ -280,6 +282,7 @@ namespace Thrustslinger.Core
                 StopCoroutine(_runRoutine);
             }
 
+            Debug.Log("[GameManager] Starting BeginRunRoutine coroutine", this);
             _runRoutine = StartCoroutine(BeginRunRoutine(CurrentRun));
         }
 
@@ -364,8 +367,15 @@ namespace Thrustslinger.Core
                 return;
             }
 
+            Debug.Log("[GameManager] Restart() called - hiding UI and starting run", this);
+            
+            // Immediately hide game over UI to prevent it from being visible during restart
+            ToggleUIForState(GameState.Boot);
+            
             // Note: Unfreezing and recentering are handled in BeginRunRoutine
             var restartContext = CurrentRun?.Clone() ?? MenuContext.Clone();
+            
+            Debug.Log($"[GameManager] Calling StartRun with context: {restartContext != null}", this);
             StartRun(restartContext);
         }
 
@@ -515,6 +525,9 @@ namespace Thrustslinger.Core
             _playerHealth?.ResetHealth();
             _lastKnownHealth = _playerHealth?.CurrentHealth ?? float.NaN;
 
+            // Reset weapon systems (ammo, reload state, etc.)
+            ResetWeaponSystems();
+
             ApplyComfortSettings(context.comfort);
             
             // Unfreeze player movement and recenter to start position
@@ -597,6 +610,28 @@ namespace Thrustslinger.Core
             {
                 if (behaviour == null) continue;
                 behaviour.enabled = active;
+            }
+        }
+
+        /// <summary>
+        /// Resets all weapon systems to initial state (ammo, reload state, etc.).
+        /// Called at the start of each run to ensure consistent starting conditions.
+        /// </summary>
+        private void ResetWeaponSystems()
+        {
+            if (weaponSystems == null) return;
+
+            foreach (var weaponBehaviour in weaponSystems)
+            {
+                if (weaponBehaviour == null) continue;
+
+                // Check if it's a ProjectileWeapon and call its reset method
+                if (weaponBehaviour is Gameplay.ProjectileWeapon projectileWeapon)
+                {
+                    projectileWeapon.ResetWeapon();
+                }
+                // HitscanWeapon doesn't need reset (no ammo system)
+                // Future weapon types can be added here
             }
         }
 
@@ -763,15 +798,25 @@ namespace Thrustslinger.Core
 
             // Temporarily make kinematic for clean teleport, then restore
             var wasKinematic = rb.isKinematic;
-            rb.isKinematic = true;
             
-            // Clear velocities and set position
-            rb.linearVelocity = Vector3.zero;
-            rb.angularVelocity = Vector3.zero;
+            // IMPORTANT: Clear velocities BEFORE setting kinematic
+            // Unity doesn't allow setting velocity on kinematic bodies
+            if (!wasKinematic)
+            {
+                rb.linearVelocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+            }
+            
+            rb.isKinematic = true;
             rb.position = centerPosition;
             
-            // Restore kinematic state
+            // Restore kinematic state and clear velocities if now dynamic
             rb.isKinematic = wasKinematic;
+            if (!wasKinematic)
+            {
+                rb.linearVelocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+            }
         }
 
         private void FreezePlayerMovement()
