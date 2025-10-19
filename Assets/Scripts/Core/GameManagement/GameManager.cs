@@ -45,6 +45,10 @@ namespace Thrustslinger.Core
             public GameObject pauseUI;
             public GameObject gameOverUI;
             public GameObject xrMenuRayRoot;
+            public MonoBehaviour scoreServiceBehaviour;
+            public MonoBehaviour comboTrackerBehaviour;
+            public MonoBehaviour playerHealthBehaviour;
+            public MonoBehaviour hapticsRouterBehaviour;
         }
 
         #endregion
@@ -464,6 +468,15 @@ namespace Thrustslinger.Core
             gameOverUI = bindings.gameOverUI;
             xrMenuRayRoot = bindings.xrMenuRayRoot;
 
+            // Update service references from scene bindings
+            scoreServiceBehaviour = bindings.scoreServiceBehaviour;
+            comboTrackerBehaviour = bindings.comboTrackerBehaviour;
+            playerHealthBehaviour = bindings.playerHealthBehaviour;
+            hapticsRouterBehaviour = bindings.hapticsRouterBehaviour;
+
+            // Re-resolve services after scene transition to ensure references are valid
+            ResolveOptionalServices();
+
             CacheGatedSystems();
             ToggleUIForState(State);
         }
@@ -483,6 +496,17 @@ namespace Thrustslinger.Core
             pauseUI = null;
             gameOverUI = null;
             xrMenuRayRoot = null;
+
+            // Clear service references to avoid dangling pointers after scene transitions
+            UnsubscribeHealthCallbacks();
+            scoreServiceBehaviour = null;
+            comboTrackerBehaviour = null;
+            playerHealthBehaviour = null;
+            hapticsRouterBehaviour = null;
+            _scoreService = null;
+            _comboTracker = null;
+            _playerHealth = null;
+            _hapticsRouter = null;
 
             CacheGatedSystems();
         }
@@ -643,10 +667,42 @@ namespace Thrustslinger.Core
 
         private void ResolveOptionalServices()
         {
+            // Try to resolve from assigned references first
             _scoreService = ResolveService<IRunScoreService>(scoreServiceBehaviour, nameof(scoreServiceBehaviour));
             _comboTracker = ResolveService<IComboTracker>(comboTrackerBehaviour, nameof(comboTrackerBehaviour));
             _playerHealth = ResolveService<IPlayerHealth>(playerHealthBehaviour, nameof(playerHealthBehaviour));
             _hapticsRouter = ResolveService<IRunHapticsRouter>(hapticsRouterBehaviour, nameof(hapticsRouterBehaviour));
+
+            // Fallback: auto-find services if not assigned (helpful after scene transitions)
+            if (_scoreService == null)
+            {
+                var fallback = FindFirstObjectByType<RuntimeScoreService>();
+                if (fallback != null)
+                {
+                    scoreServiceBehaviour = fallback;
+                    _scoreService = fallback;
+                }
+            }
+
+            if (_comboTracker == null)
+            {
+                var fallback = FindFirstObjectByType<ComboTracker>();
+                if (fallback != null)
+                {
+                    comboTrackerBehaviour = fallback;
+                    _comboTracker = fallback;
+                }
+            }
+
+            if (_playerHealth == null)
+            {
+                var fallback = FindFirstObjectByType<PlayerHealth>();
+                if (fallback != null)
+                {
+                    playerHealthBehaviour = fallback;
+                    _playerHealth = fallback;
+                }
+            }
 
             if (_playerHealth != null)
             {
