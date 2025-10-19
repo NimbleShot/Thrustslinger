@@ -15,25 +15,32 @@ namespace Thrustslinger.UI
         [SerializeField] private TMP_Text healthText;
         [SerializeField] private TMP_Text scoreText;
         [SerializeField] private TMP_Text elapsedText;
+        [SerializeField] private TMP_Text comboText;
 
         [Header("Data Sources")]
         [Tooltip("Explicit IPlayerHealth provider. If unassigned the first PlayerHealth in the scene is used.")]
     private MonoBehaviour healthProviderBehaviour;
     [Tooltip("Score provider that implements IRuntimeScoreProvider. If null we auto-find RuntimeScoreService.")]
     private MonoBehaviour scoreProviderBehaviour;
+        [Tooltip("Combo provider that implements IRuntimeComboProvider. If null we auto-find ComboTracker.")]
+        [SerializeField] private MonoBehaviour comboProviderBehaviour;
 
         [Header("Formatting")]
         [SerializeField] private string healthFormat = "Health: {0}/{1}";
         [SerializeField] private string scoreFormat = "Score: {0}";
         [SerializeField] private string timeFormat = "Time: {0}";
+        [SerializeField] private string comboFormat = "Combo: {0}";
+        [SerializeField] private int comboThreshold = 2;
 
         private IPlayerHealth _health;
         private IRuntimeScoreProvider _scoreProvider;
+        private IRuntimeComboProvider _comboProvider;
         private GameManager _gameManager;
 
         private float _currentHealth;
         private float _maxHealth;
         private float _currentScore;
+        private int _currentCombo;
 
         private bool _subscriptionsActive;
 
@@ -42,6 +49,7 @@ namespace Thrustslinger.UI
             _gameManager = GameManager.Instance;
             ResolveHealthProvider();
             ResolveScoreProvider();
+            ResolveComboProvider();
             RefreshAll();
         }
 
@@ -81,6 +89,12 @@ namespace Thrustslinger.UI
                 _scoreProvider.ScoreChanged += HandleScoreChanged;
             }
 
+            if (_comboProvider != null)
+            {
+                _comboProvider.ComboChanged -= HandleComboChanged;
+                _comboProvider.ComboChanged += HandleComboChanged;
+            }
+
             if (_gameManager != null)
             {
                 _gameManager.OnRunStarted -= HandleRunStarted;
@@ -109,6 +123,11 @@ namespace Thrustslinger.UI
                 _scoreProvider.ScoreChanged -= HandleScoreChanged;
             }
 
+            if (_comboProvider != null)
+            {
+                _comboProvider.ComboChanged -= HandleComboChanged;
+            }
+
             if (_gameManager != null)
             {
                 _gameManager.OnRunStarted -= HandleRunStarted;
@@ -122,6 +141,7 @@ namespace Thrustslinger.UI
         {
             ResolveHealthProvider();
             ResolveScoreProvider();
+            ResolveComboProvider();
             Subscribe();
             RefreshAll();
         }
@@ -132,6 +152,9 @@ namespace Thrustslinger.UI
             {
                 _currentScore = _scoreProvider?.CurrentScore ?? 0f;
                 UpdateScoreText();
+                
+                _currentCombo = _comboProvider?.CurrentCombo ?? 0;
+                UpdateComboText();
             }
         }
 
@@ -146,6 +169,12 @@ namespace Thrustslinger.UI
         {
             _currentScore = Mathf.Max(0f, newScore);
             UpdateScoreText();
+        }
+
+        private void HandleComboChanged(int newCombo)
+        {
+            _currentCombo = Mathf.Max(0, newCombo);
+            UpdateComboText();
         }
 
         private void RefreshAll()
@@ -163,8 +192,11 @@ namespace Thrustslinger.UI
 
             _currentScore = _scoreProvider?.CurrentScore ?? 0f;
 
+            _currentCombo = _comboProvider?.CurrentCombo ?? 0;
+
             UpdateHealthText();
             UpdateScoreText();
+            UpdateComboText();
             UpdateElapsedTime();
         }
 
@@ -189,6 +221,25 @@ namespace Thrustslinger.UI
 
             var formattedScore = Mathf.RoundToInt(_currentScore).ToString("N0");
             scoreText.text = string.Format(scoreFormat, formattedScore);
+        }
+
+        private void UpdateComboText()
+        {
+            if (comboText == null)
+            {
+                return;
+            }
+
+            // Only show combo text if it meets the threshold
+            if (_currentCombo >= comboThreshold)
+            {
+                comboText.text = string.Format(comboFormat, _currentCombo);
+            }
+            else
+            {
+                // Clear the text instead of disabling the GameObject
+                comboText.text = string.Empty;
+            }
         }
 
         private void UpdateElapsedTime()
@@ -252,6 +303,30 @@ namespace Thrustslinger.UI
                 if (fallback != null)
                 {
                     _scoreProvider = fallback;
+                }
+            }
+        }
+
+        private void ResolveComboProvider()
+        {
+            if (comboProviderBehaviour != null)
+            {
+                if (comboProviderBehaviour is IRuntimeComboProvider provider)
+                {
+                    _comboProvider = provider;
+                }
+                else if (_comboProvider == null)
+                {
+                    Debug.LogWarning($"[HudPresenter] Assigned combo provider '{comboProviderBehaviour.name}' does not implement IRuntimeComboProvider.", comboProviderBehaviour);
+                }
+            }
+
+            if (_comboProvider == null)
+            {
+                var fallback = FindFirstObjectByType<ComboTracker>(FindObjectsInactive.Include);
+                if (fallback != null)
+                {
+                    _comboProvider = fallback;
                 }
             }
         }

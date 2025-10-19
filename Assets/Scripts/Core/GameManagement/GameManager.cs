@@ -414,6 +414,12 @@ namespace Thrustslinger.Core
         public void RegisterKill(in RunKillData killData)
         {
             _scoreService?.RegisterKill(killData);
+            
+            // Increment combo on successful kill
+            if (_comboTracker is IRuntimeComboProvider comboProvider)
+            {
+                comboProvider.IncrementCombo();
+            }
         }
 
         /// <summary>Called when a target breaches the plane so health/combo can be managed.</summary>
