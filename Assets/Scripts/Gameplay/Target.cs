@@ -106,6 +106,12 @@ namespace Thrustslinger.Gameplay
             CachePoolBinding();
             ResetHp();
 
+            // Ensure collider is enabled for pooled objects
+            if (_collider != null)
+            {
+                _collider.enabled = true;
+            }
+
             if (context is TargetSpawnContext spawnContext)
             {
                 _spawner = spawnContext.Spawner;

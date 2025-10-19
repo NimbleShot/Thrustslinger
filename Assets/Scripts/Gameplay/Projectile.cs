@@ -75,6 +75,13 @@ namespace Thrustslinger.Gameplay
                 body.angularVelocity = Vector3.zero;
             }
 
+            // Ensure rigidbody is awake and ready for collisions
+            if (body)
+            {
+                body.WakeUp();
+                body.isKinematic = false;
+            }
+
             var spawnCtx = context as ProjectileSpawnContext;
             if (spawnCtx != null)
             {
